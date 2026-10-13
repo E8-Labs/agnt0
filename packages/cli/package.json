@@ -1,0 +1,38 @@
+{
+  "name": "agnt0",
+  "version": "0.1.0",
+  "description": "Agent Zero CLI: drives your own Claude Code or Codex through the Agent Zero build loop",
+  "type": "module",
+  "bin": { "agnt0": "dist/index.js" },
+  "files": ["dist", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"],
+  "engines": { "node": ">=20" },
+  "license": "Elastic-2.0",
+  "homepage": "https://agnt0.dev",
+  "keywords": ["agent", "cli", "claude-code", "codex", "ai"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "prepack": "node scripts/prepack.mjs"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^1.1.0",
+    "commander": "^14.0.0",
+    "execa": "^9.5.0",
+    "ink": "^6.3.0",
+    "open": "^10.1.0",
+    "picocolors": "^1.1.1",
+    "react": "^19.1.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@agnt0/protocol": "workspace:*",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/ws": "^8.5.13",
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

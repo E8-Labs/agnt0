@@ -513,3 +513,85 @@ export const routes = {
   guideHistory: "/v1/guide/sessions/current",
   realtime: (id: string) => `/v1/rt/projects/${id}`,
 } as const;
+
+/* ------------------------------------------------------------------ */
+// added by api — additive response/request schemas for routes above whose shapes were not yet defined
+/* ------------------------------------------------------------------ */
+
+/** Generic acknowledgement: logoutWeb, revoke, heartbeat, stripeWebhook. */
+export const OkResponse = z.object({ ok: z.literal(true) });
+export type OkResponse = z.infer<typeof OkResponse>;
+
+/** Response of POST /v1/oauth/device/approve. */
+export const DeviceApproveResponse = z.object({
+  ok: z.literal(true),
+  status: z.enum(["approved", "denied"]),
+  device_name: z.string(),
+  os: z.string(),
+});
+export type DeviceApproveResponse = z.infer<typeof DeviceApproveResponse>;
+
+export const PaidPlan = z.enum(["starter", "pro", "max"]);
+export type PaidPlan = z.infer<typeof PaidPlan>;
+export const CreditPack = z.enum(["pack_10", "pack_25", "pack_50"]);
+export type CreditPack = z.infer<typeof CreditPack>;
+
+/** POST /v1/billing/dev-activate (local dev only) — responds with UsageSnapshot. */
+export const DevActivateRequest = z.object({ plan: PaidPlan });
+/** POST /v1/billing/checkout */
+export const CheckoutRequest = z.object({ plan: PaidPlan });
+/** POST /v1/credits/checkout */
+export const CreditsCheckoutRequest = z.object({ pack: CreditPack });
+/** Response of both checkout routes: redirect the browser to `url`. */
+export const CheckoutResponse = z.object({ url: z.string() });
+export type CheckoutResponse = z.infer<typeof CheckoutResponse>;
+
+/** GET /v1/projects */
+export const ProjectList = z.object({ projects: z.array(Project) });
+export type ProjectList = z.infer<typeof ProjectList>;
+
+/** GET /v1/projects/{id}/tickets (PATCH .../tickets/{ticketId} responds with Ticket). */
+export const TicketList = z.object({ tickets: z.array(Ticket) });
+export type TicketList = z.infer<typeof TicketList>;
+
+/** Response of POST /v1/steps/{id}/events */
+export const StepEventsResponse = z.object({ accepted: z.number().int() });
+
+/** GET /v1/projects/{id}/activity — newest first. */
+export const ActivityStep = z.object({
+  id: z.string(),
+  ticket_id: z.string().nullable(),
+  kind: StepKind,
+  role: Role,
+  model: ModelTier,
+  status: StepStatus,
+  summary: z.string().nullable(),
+  credits_charged: z.number(),
+  started_at: z.string(),
+  ended_at: z.string().nullable(),
+});
+export const ActivityEvent = z.object({
+  id: z.string(),
+  step_id: z.string(),
+  type: EventType,
+  summary: z.string(),
+  at: z.string(),
+  data: z.record(z.unknown()).optional(),
+});
+export const ActivityResponse = z.object({ steps: z.array(ActivityStep), events: z.array(ActivityEvent) });
+export type ActivityResponse = z.infer<typeof ActivityResponse>;
+
+/** GET /v1/guide/sessions/current */
+export const GuideSession = z.object({
+  id: z.string(),
+  phase: z.enum(["discovery", "setup", "after_handoff"]),
+  project_id: z.string().nullable(),
+  created_at: z.string(),
+});
+export type GuideSession = z.infer<typeof GuideSession>;
+export const GuideHistoryResponse = z.object({ session: GuideSession.nullable(), messages: z.array(GuideMessage) });
+export type GuideHistoryResponse = z.infer<typeof GuideHistoryResponse>;
+
+/** Realtime user channel (counterpart of routes.realtime): wss://<api>/v1/rt/me?token=... carries
+ *  usage.updated, limit.reached, onboarding.updated and cli.heartbeat for the signed-in user. */
+export const realtimeMe = "/v1/rt/me";
