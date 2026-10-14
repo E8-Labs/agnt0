@@ -23,6 +23,8 @@ export interface DoctorResult {
   ready: boolean;
   /** Checks that don't block `agnt0 run`. */
   optional: Set<CheckId>;
+  /** Things worth saying even when everything needed is in place. */
+  notes?: string[];
 }
 
 export const CHECK_LABELS: Record<CheckId, string> = {
@@ -148,7 +150,13 @@ export function summarize(checks: Check[]): DoctorResult {
   const ready = okId("node") && okId("git") && okId("package_manager") && (claudeReady || codexReady);
   const fixes: DoctorResult["fixes"] = {};
   for (const c of checks) if (!c.ok) fixes[c.id] = FIXES[c.id];
-  return { report: { cli_version: CLI_VERSION, os: describeOs(), checks }, fixes, ready, optional };
+  const notes: string[] = [];
+  // Codex runs, but its per-command approvals are not enforced yet — the sandbox is the guard. A
+  // user with only Codex should hear that rather than just "ready to build".
+  if (codexReady && !claudeReady) {
+    notes.push("Codex support is still experimental: steps are confined by Codex's sandbox, but per-command approvals aren't enforced yet. Install Claude Code for the fully supported path.");
+  }
+  return { report: { cli_version: CLI_VERSION, os: describeOs(), checks }, fixes, ready, optional, ...(notes.length ? { notes } : {}) };
 }
 
 export async function runDoctorChecks(): Promise<DoctorResult> {

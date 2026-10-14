@@ -46,6 +46,25 @@ export async function runLines(
   return { exitCode: r.exitCode ?? null, stderr, aborted: Boolean(r.isCanceled) || opts.signal.aborted, spawnError };
 }
 
+/**
+ * Runs a command and returns its output. For asking a runner about itself (a model catalog, a
+ * policy check) rather than driving a step. `maxBuffer` is generous: Codex's catalog is ~650KB.
+ */
+export async function runCapture(
+  file: string,
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  const r = await execa(file, args, {
+    reject: false,
+    timeout: opts.timeoutMs ?? 20_000,
+    maxBuffer: 32 * 1024 * 1024,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(opts.env ? { env: opts.env } : {}),
+  });
+  return { exitCode: r.exitCode ?? null, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
 export async function commandVersion(file: string, args = ["--version"], timeout = 10000): Promise<string | null> {
   try {
     const r = await execa(file, args, { reject: false, timeout });

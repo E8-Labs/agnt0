@@ -16,6 +16,7 @@ export function renderDoctor(r: DoctorResult): string {
   const out = [table(rows)];
   if (fixes.length) out.push("", pc.bold("To fix"), ...fixes);
   out.push("", r.ready ? `${pc.green("✓")} Ready to build.` : `${pc.red("✗")} Not ready yet: fix the items above, then run \`agnt0 doctor\` again.`);
+  for (const note of r.notes ?? []) out.push(`${pc.yellow("!")}  ${note}`);
   return out.join("\n");
 }
 

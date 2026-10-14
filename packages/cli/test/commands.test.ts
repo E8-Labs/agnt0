@@ -1,6 +1,6 @@
 import { Project, routes } from "@agnt0/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { doctorCommand } from "../src/commands/doctor.js";
+import { doctorCommand, renderDoctor } from "../src/commands/doctor.js";
 import { logoutCommand } from "../src/commands/logout.js";
 import { statusCommand } from "../src/commands/status.js";
 import { usageCommand } from "../src/commands/usage.js";
@@ -141,6 +141,25 @@ describe("command smoke tests (API mocked)", () => {
     expect(api.requests[0]!.path).toBe(routes.doctorReports);
     expect(api.requests[0]!.body.checks[0]).toMatchObject({ id: "node", ok: true });
     expect(process.exitCode).toBeUndefined();
+  });
+
+  // A Codex-only user is ready to build, but Codex's per-command approvals are not enforced yet, so
+  // "✓ Ready to build." on its own would overstate what they are getting.
+  it("doctor warns a Codex-only user that Codex is still experimental", () => {
+    const ok = [
+      nodeCheck("22.1.0"),
+      { id: "git", ok: true, detail: "" },
+      { id: "package_manager", ok: true, detail: "" },
+      { id: "ports", ok: true, detail: "free" },
+    ] as const;
+    const codexOnly = summarize([...ok, { id: "claude", ok: false, detail: "" }, { id: "claude_login", ok: false, detail: "" }, { id: "codex", ok: true, detail: "0.162.1" }, { id: "codex_login", ok: true, detail: "logged in" }]);
+    expect(codexOnly.ready).toBe(true);
+    expect(codexOnly.notes?.join(" ")).toMatch(/experimental/i);
+    expect(renderDoctor(codexOnly)).toMatch(/approvals aren't enforced/);
+
+    // With Claude present there is nothing to warn about.
+    const both = summarize([...ok, { id: "claude", ok: true, detail: "2.1" }, { id: "claude_login", ok: true, detail: "logged in" }, { id: "codex", ok: true, detail: "0.162.1" }, { id: "codex_login", ok: true, detail: "logged in" }]);
+    expect(both.notes ?? []).toEqual([]);
   });
 
   it("doctor flags old Node and a missing runner", () => {

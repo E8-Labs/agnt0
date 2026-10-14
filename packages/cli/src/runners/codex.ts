@@ -1,5 +1,6 @@
 import type { StepEvent, TokenUsage } from "@agnt0/protocol";
 import type { Step } from "@agnt0/protocol";
+import { modelForTier } from "./codex-models.js";
 import { commandVersion, runLines } from "./spawn.js";
 import { zeroUsage, type RunnerAdapter, type RunnerInput, type RunnerResult } from "./types.js";
 
@@ -67,12 +68,41 @@ export function codexSandbox(step: Pick<Step, "kind">): "read-only" | "workspace
   return step.kind === "plan" || step.kind === "review" || step.kind === "audit" ? "read-only" : "workspace-write";
 }
 
-export function codexArgs(step: Pick<Step, "kind">): string[] {
-  // No --full-auto: the sandbox is chosen per step kind. Prompt on stdin ("-").
-  return ["exec", "--json", "--sandbox", codexSandbox(step), "--skip-git-repo-check", "-"];
+export interface CodexArgsOptions {
+  /** The step's working root, so Codex writes inside the ticket worktree and nowhere else. */
+  cwd?: string;
+  /** Resolved from the installed Codex's own catalog; omitted when it could not be read. */
+  model?: { model: string | null; reasoningEffort: string | null };
 }
 
-/** EXPERIMENTAL Codex runner: `codex exec --json` with the prompt on stdin, using the user's Codex login. */
+export function codexArgs(step: Pick<Step, "kind">, opts: CodexArgsOptions = {}): string[] {
+  // No --full-auto: the sandbox is chosen per step kind. Prompt on stdin ("-").
+  const args = ["exec", "--json", "--sandbox", codexSandbox(step)];
+  // Role prompts are server-only text and must not reach the disk, so the session is never saved.
+  // This is the Codex counterpart of Claude Code's --no-session-persistence.
+  args.push("--ephemeral");
+  args.push("--skip-git-repo-check");
+  // Be explicit about the working root: the worktree lives inside the repo, and without this Codex
+  // is free to treat the enclosing repository as the workspace it may write to.
+  if (opts.cwd) args.push("--cd", opts.cwd);
+  if (opts.model?.model) args.push("--model", opts.model.model);
+  if (opts.model?.reasoningEffort) args.push("-c", `model_reasoning_effort="${opts.model.reasoningEffort}"`);
+  args.push("-");
+  return args;
+}
+
+/**
+ * EXPERIMENTAL Codex runner: `codex exec --json` with the prompt on stdin, using the user's Codex
+ * login.
+ *
+ * Still experimental for one reason: per-command approvals are not enforced. `buildCodexPolicy`
+ * generates the right execpolicy and its rules are verified against `codex execpolicy check`, but
+ * Codex discovers `.rules` files from conventional paths rather than a flag, and which path that is
+ * could not be confirmed without a live turn (`codex sandbox` and `codex doctor` do not consult the
+ * execpolicy). Until a real run pins it down, the **sandbox is the only guard**: read-only for steps
+ * that only look, workspace-write — which also blocks network — for the rest. That is the same
+ * guarantee as before; it is just no weaker than it looks.
+ */
 export class CodexRunner implements RunnerAdapter {
   readonly id = "codex" as const;
   readonly label = "Codex (experimental)";
@@ -83,10 +113,11 @@ export class CodexRunner implements RunnerAdapter {
   }
 
   async run({ step, cwd, signal, onEvent, env }: RunnerInput): Promise<RunnerResult> {
-    const parser = new CodexStreamParser();
-    // Model tiers are not mapped for Codex yet: the user's configured Codex model is used.
-    // requires_approval can't be mapped to per-command rules for Codex yet; the sandbox is the guard.
-    const args = codexArgs(step);
+    const model = await modelForTier(this.bin, step.model);
+    // Report the model Codex actually ran, not the tier we asked for, so usage lands against a real
+    // model. Falls back to the tier when the catalog could not be read and Codex picked for itself.
+    const parser = new CodexStreamParser(model.model ?? step.model);
+    const args = codexArgs(step, { cwd, model });
     const proc = await runLines(this.bin, args, { cwd, input: step.prompt, signal, onLine: (l) => parser.push(l).forEach(onEvent), env });
     const usage = parser.usage();
     if (proc.aborted) return { ok: false, finalText: parser.lastMessage, usage, error: "interrupted" };
