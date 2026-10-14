@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createCheckpointRef, safeRefPart } from "./checkpoint.js";
 import { commitAll, ensureExcluded, git, gitOk, headSha, parseShortStat, type ShortStat } from "./git.js";
 
 export interface Worktree {
@@ -13,9 +14,6 @@ export interface Worktree {
 
 const WT_DIR = join(".agnt0", "wt");
 
-function safeRefPart(s: string): string {
-  return s.replace(/[^A-Za-z0-9._/-]/g, "-").replace(/\.\.+/g, ".").replace(/^[-/.]+|[/.]+$/g, "") || "x";
-}
 
 /** One git worktree per leased ticket under `.agnt0/wt/<ticket>`. */
 export class WorktreeManager {
@@ -83,21 +81,12 @@ export class WorktreeManager {
 
 /**
  * Snapshot before a risky step: `refs/agnt0/checkpoints/<id>` points at a commit holding the current
- * working tree (via `git stash create`, which touches nothing) or HEAD when the tree is clean.
+ * working tree (tracked and untracked files, via a throwaway index; nothing is touched) or HEAD when
+ * the tree is clean.
  */
 export async function createCheckpoint(cwd: string, id: string): Promise<string | null> {
-  const head = await headSha(cwd);
-  if (!head) return null;
-  let sha = head;
-  try {
-    const stash = await git(cwd, ["stash", "create", `agnt0 checkpoint ${id}`]);
-    if (stash) sha = stash;
-  } catch {
-    /* keep HEAD */
-  }
-  const ref = `refs/agnt0/checkpoints/${safeRefPart(id)}`;
-  await git(cwd, ["update-ref", ref, sha]);
-  return ref;
+  if (!(await headSha(cwd))) return null;
+  return (await createCheckpointRef(cwd, id))?.ref ?? null;
 }
 
 export interface DiffResult extends ShortStat {

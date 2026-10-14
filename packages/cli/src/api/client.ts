@@ -27,6 +27,8 @@ export interface RequestOptions<T> {
   /** Defaults to true. Auth endpoints pass false. */
   auth?: boolean;
   signal?: AbortSignal;
+  /** Overrides the client's 429 retry budget for this call (0 = fail fast). */
+  max429Retries?: number;
 }
 
 export const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -60,6 +62,9 @@ export class ApiClient {
   }
   patch<T>(path: string, opts: RequestOptions<T> = {}): Promise<T> {
     return this.request("PATCH", path, opts);
+  }
+  put<T>(path: string, opts: RequestOptions<T> = {}): Promise<T> {
+    return this.request("PUT", path, opts);
   }
 
   async request<T>(method: string, path: string, opts: RequestOptions<T> = {}): Promise<T> {
@@ -101,7 +106,7 @@ export class ApiClient {
         throw new CliError("Your Agent Zero session has expired.", "Run `agnt0 login` again.");
       }
 
-      if (res.status === 429 && rateLimitHits < this.max429Retries) {
+      if (res.status === 429 && rateLimitHits < (opts.max429Retries ?? this.max429Retries)) {
         rateLimitHits++;
         const header = Number(res.headers.get("retry-after"));
         const wait = err.body?.retry_after_s ?? (Number.isFinite(header) && header > 0 ? header : 2 ** rateLimitHits);

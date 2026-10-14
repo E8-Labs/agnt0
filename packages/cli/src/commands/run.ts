@@ -1,4 +1,7 @@
+import type { RealtimeEvent } from "@agnt0/protocol";
 import pc from "picocolors";
+import { debug } from "../config.js";
+import { loadDevEnv, splitForRunner } from "../env.js";
 import { type Context, requireLogin } from "../context.js";
 import { CliError } from "../errors.js";
 import { ensureExcluded, isGitRepo } from "../git.js";
@@ -6,6 +9,14 @@ import { requireProject } from "../project.js";
 import { runLoop, type RunExit } from "../run/loop.js";
 import { ClaudeRunner } from "../runners/claude.js";
 import { CodexRunner } from "../runners/codex.js";
+
+/** What `run --watch` / `watch` print when the dashboard asks for a rollback (never executed automatically). */
+export function restoreRequestedLines(ev: Extract<RealtimeEvent, { type: "checkpoint.restore_requested" }>): string[] {
+  return [
+    `${pc.yellow("↺")} Rollback requested from the dashboard: ${pc.bold(ev.checkpoint.name)} ${pc.dim(`(${ev.checkpoint.git_sha.slice(0, 12)})`)}`,
+    `   To restore it, run: ${pc.cyan(`agnt0 rollback ${ev.checkpoint.id}`)}   ${pc.dim("(makes a safety checkpoint and a new branch first)")}`,
+  ];
+}
 
 export async function runCommand(ctx: Context, opts: { watch?: boolean; once?: boolean }): Promise<RunExit> {
   await requireLogin(ctx);
@@ -31,6 +42,28 @@ export async function runCommand(ctx: Context, opts: { watch?: boolean; once?: b
   process.on("SIGTERM", onSigint);
 
   console.log(`${pc.bold("agnt0 run")} ${pc.dim(`· ${project.name ?? project.project_id} · ${ctx.apiUrl}`)}`);
+  const { env, heldBack } = splitForRunner(await loadDevEnv(ctx.api, project.project_id));
+  const n = Object.keys(env).length;
+  if (n || heldBack.length) {
+    console.log(pc.dim(`  env: ${n} dev var${n === 1 ? "" : "s"} injected${heldBack.length ? ` (kept from the runner: ${heldBack.join(", ")})` : ""}`));
+  }
+
+  // `--watch` also listens on the project channel so dashboard rollback requests reach the terminal.
+  let unsubscribe: (() => void) | null = null;
+  if (opts.watch) {
+    try {
+      const { createWatchSource } = await import("../watch/source.js");
+      const source = createWatchSource({ api: ctx.api, apiUrl: ctx.apiUrl, projectId: project.project_id, tokens: ctx.session });
+      unsubscribe = source.subscribe({
+        onEvent: (ev) => {
+          if (ev.type === "checkpoint.restore_requested") for (const l of restoreRequestedLines(ev)) console.log(l);
+        },
+        onStatus: () => {},
+      });
+    } catch (e) {
+      debug("realtime subscribe failed", e);
+    }
+  }
   try {
     const exit = await runLoop({
       api: ctx.api,
@@ -41,11 +74,13 @@ export async function runCommand(ctx: Context, opts: { watch?: boolean; once?: b
       watch: opts.watch,
       maxSteps: opts.once ? 1 : undefined,
       signal: ac.signal,
+      env,
     });
     if (exit.status === "paused") console.log(pc.yellow("paused"));
     if (exit.status === "interrupted") process.exitCode = 130;
     return exit;
   } finally {
+    unsubscribe?.();
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigint);
   }

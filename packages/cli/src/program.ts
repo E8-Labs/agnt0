@@ -1,5 +1,10 @@
 import { Command, CommanderError } from "commander";
+import { auditCommand } from "./commands/audit.js";
+import { checkpointCommand, checkpointsCommand, rollbackCommand } from "./commands/checkpoint.js";
 import { doctorCommand } from "./commands/doctor.js";
+import { envPullCommand } from "./commands/env.js";
+import { previewCommand } from "./commands/preview.js";
+import { qaCommand } from "./commands/qa.js";
 import { initCommand, linkCommand } from "./commands/init.js";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
@@ -95,6 +100,58 @@ export function buildProgram(makeContext: () => Context = () => createContext())
     .action(wrap((ctx, o: { watch?: boolean; once?: boolean }) => runCommand(ctx, o)));
 
   program.command("watch").description("full-screen live view of your agents").action(wrap((ctx) => watchCommand(ctx)));
+
+  program
+    .command("audit")
+    .description("run the Code Auditor on this repo: health score and findings on the dashboard (read-only)")
+    .option("--static", "static checks only; don't boot the app")
+    .option("--no-run", "only queue it; it runs first on your next `agnt0 run`")
+    .option("--skip", "skip the queued or running audit so the Planner can start")
+    .action(wrap((ctx, o: { static?: boolean; run: boolean; skip?: boolean }) => auditCommand(ctx, o)));
+
+  program
+    .command("preview")
+    .description("start the dev server and open the device preview (mobile, tablet, desktop)")
+    .option("--no-browser", "don't open a browser")
+    .option("--url <url>", "use a dev server that's already running instead of starting one")
+    .option("--port <port>", "port for the dev server agnt0 starts")
+    .action(wrap((ctx, o: { browser: boolean; url?: string; port?: string }) => previewCommand(ctx, o)));
+
+  program
+    .command("qa")
+    .description("local QA pass: Chromium at each device size, screenshots and findings to the dashboard")
+    .option("--devices <list>", "comma-separated: mobile,tablet,desktop", "mobile,tablet,desktop")
+    .option("--pages <list>", "comma-separated paths, e.g. /,/about", "/")
+    .option("--url <url>", "test this running app instead of the preview / dev server")
+    .option("-y, --yes", "install Chromium without asking if it's missing")
+    .action(wrap((ctx, o: { devices?: string; pages?: string; url?: string; yes?: boolean }) => qaCommand(ctx, o)));
+
+  const env = program.command("env").description("project environment variables and secrets");
+  env
+    .command("pull")
+    .description("fetch the project's env vars (count only; values are never printed)")
+    .option("-e, --environment <name>", "dev, preview or prod", "dev")
+    .option("--write", "write them to a gitignored .env.local (mode 0600)")
+    .argument("[command...]", "after --, run this command with the vars injected")
+    .addHelpText("after", "\n`agnt0 run` and `agnt0 preview` inject the dev vars on their own.\nExample: agnt0 env pull -- npm test")
+    .action(wrap((ctx, command: string[], o: { environment?: string; write?: boolean }) => envPullCommand(ctx, o, command)));
+
+  program
+    .command("checkpoint [name]")
+    .description("snapshot the working tree (incl. uncommitted files) as a named checkpoint")
+    .action(wrap((ctx, name: string | undefined) => checkpointCommand(ctx, name)));
+
+  program
+    .command("checkpoints")
+    .description("list this project's checkpoints")
+    .option("--json", "machine-readable output")
+    .action(wrap((ctx, o: { json?: boolean }) => checkpointsCommand(ctx, o)));
+
+  program
+    .command("rollback <id>")
+    .description("restore a checkpoint on a new safety branch (a pre-rollback checkpoint is taken first)")
+    .option("-y, --yes", "don't ask for confirmation")
+    .action(wrap((ctx, id: string, o: { yes?: boolean }) => rollbackCommand(ctx, id, o)));
 
   program.command("open").description("open the project dashboard in your browser").action(wrap((ctx) => openCommand(ctx)));
 

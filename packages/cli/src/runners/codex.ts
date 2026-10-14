@@ -82,12 +82,12 @@ export class CodexRunner implements RunnerAdapter {
     return (await commandVersion(this.bin)) !== null;
   }
 
-  async run({ step, cwd, signal, onEvent }: RunnerInput): Promise<RunnerResult> {
+  async run({ step, cwd, signal, onEvent, env }: RunnerInput): Promise<RunnerResult> {
     const parser = new CodexStreamParser();
     // Model tiers are not mapped for Codex yet: the user's configured Codex model is used.
     // requires_approval can't be mapped to per-command rules for Codex yet; the sandbox is the guard.
     const args = codexArgs(step);
-    const proc = await runLines(this.bin, args, { cwd, input: step.prompt, signal, onLine: (l) => parser.push(l).forEach(onEvent) });
+    const proc = await runLines(this.bin, args, { cwd, input: step.prompt, signal, onLine: (l) => parser.push(l).forEach(onEvent), env });
     const usage = parser.usage();
     if (proc.aborted) return { ok: false, finalText: parser.lastMessage, usage, error: "interrupted" };
     if (proc.spawnError) return { ok: false, finalText: "", usage, error: `Could not start Codex: ${proc.spawnError}` };

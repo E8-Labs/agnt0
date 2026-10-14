@@ -6,6 +6,8 @@ export interface RunnerInput {
   cwd: string;
   signal: AbortSignal;
   onEvent: (event: StepEvent) => void;
+  /** Project env vars to add to the runner's environment (already filtered; never logged). */
+  env?: Record<string, string>;
 }
 
 export interface RunnerResult {

@@ -7,6 +7,7 @@ import type { ApiClient } from "../api/client.js";
 import { type Context, requireLogin } from "../context.js";
 import { debug } from "../config.js";
 import { ApiHttpError, CliError } from "../errors.js";
+import { auditQueuedLines } from "../audit.js";
 import { pickProject, ttyPickerIO, type PickerIO } from "../picker.js";
 import { ensureExcluded, headSha, isGitRepo, repoRoot } from "../git.js";
 import { PROJECT_FILE, readProjectFile, writeProjectFile } from "../project.js";
@@ -162,6 +163,8 @@ export async function linkCommand(
   await requireLogin(ctx);
   const res = await createAndLinkProject({ api: ctx.api, apiUrl: ctx.apiUrl, dir: process.cwd(), mode: "existing", name, force: opts.force, projectId: opts.project, picker });
   printLinked(ctx, res, log);
+  // A newly linked repo gets a Code Auditor pass first (queued by the API); say so before `run`.
+  if (!res.attached) for (const l of await auditQueuedLines(ctx.api, res.project.id)) log(l);
   return res;
 }
 

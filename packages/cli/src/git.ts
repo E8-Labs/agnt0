@@ -10,6 +10,15 @@ export async function git(cwd: string, args: string[]): Promise<string> {
   return r.stdout.trim();
 }
 
+/** Like `git` but with extra environment (e.g. a temporary GIT_INDEX_FILE). */
+export async function gitEnv(cwd: string, args: string[], env: Record<string, string>): Promise<string> {
+  const r = await execa("git", args, { cwd, reject: false, env });
+  if (r.exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${(r.stderr || r.stdout).trim()}`);
+  }
+  return r.stdout.trim();
+}
+
 export async function gitOk(cwd: string, args: string[]): Promise<boolean> {
   const r = await execa("git", args, { cwd, reject: false });
   return r.exitCode === 0;

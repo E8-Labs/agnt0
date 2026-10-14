@@ -32,7 +32,9 @@ agnt0 init      # create a project here, or attach to the guide's: agnt0 init --
 agnt0 run       # start the build loop
 ```
 
-Then `agnt0 watch` for a live terminal view, or `agnt0 open` for the dashboard. See
+Then `agnt0 watch` for a live terminal view, or `agnt0 open` for the dashboard. `agnt0 preview` shows
+the app in mobile, tablet and desktop frames, `agnt0 qa` tests it in Chromium, and `agnt0 checkpoint` /
+`agnt0 rollback` keep you safe. See
 [packages/cli/README.md](packages/cli/README.md) for every command.
 
 ## Develop from source

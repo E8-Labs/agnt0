@@ -1,4 +1,5 @@
 import {
+  AuditOutput,
   ROLE_LABELS,
   routes,
   StepCompleteResponse,
@@ -18,7 +19,9 @@ import { extractJsonOutput } from "../runners/json-output.js";
 import { zeroUsage, type RunnerAdapter } from "../runners/types.js";
 import { truncate } from "../ui.js";
 import { CLI_VERSION } from "../version.js";
-import { createCheckpoint, finalizeWorktree, measureRoot, WorktreeManager, type DiffResult } from "../worktree.js";
+import { createCheckpointRef, postCheckpoint } from "../checkpoint.js";
+import { git } from "../git.js";
+import { finalizeWorktree, measureRoot, WorktreeManager, type DiffResult } from "../worktree.js";
 import { EventBatcher } from "./events.js";
 import { pauseMessage, usageWarnings } from "./limits.js";
 import { collectCompletionSummary, formatCompletionSummary } from "./summary.js";
@@ -44,6 +47,8 @@ export interface RunLoopOptions {
   idlePollMs?: number;
   pausePollMs?: number;
   eventFlushMs?: number;
+  /** Project env vars for the runner's environment (already filtered for the runner). */
+  env?: Record<string, string>;
 }
 
 type HeartbeatState = "idle" | "running" | "paused";
@@ -203,17 +208,30 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
 
   let cwd = repoRoot;
   let wt: { path: string; baseSha: string } | null = null;
+  // Audits are read-only: repo root, no worktree, no checkpoint, no commit.
+  const isAudit = step.kind === "audit";
+  const statusBefore = isAudit ? await porcelain(repoRoot) : null;
   try {
-    if (step.worktree) {
+    if (step.worktree && !isAudit) {
       const mgr = new WorktreeManager(repoRoot);
       const w = await mgr.ensure(step.worktree, step.branch);
       cwd = w.path;
       wt = w;
       log(pc.dim(`  worktree ${relative(repoRoot, w.path)} on ${w.branch}${w.created ? " (new)" : ""}`));
     }
-    if (step.checkpoint_before) {
-      const ref = await createCheckpoint(cwd, step.step_id);
-      if (ref) log(pc.dim(`  checkpoint ${ref}`));
+    if (step.checkpoint_before && !isAudit && (await headSha(cwd))) {
+      const cp = await createCheckpointRef(cwd, step.step_id, `agnt0 checkpoint before ${step.kind} ${ticket}`);
+      if (cp) {
+        log(pc.dim(`  checkpoint ${cp.ref}`));
+        const rec = await postCheckpoint(api, step.project_id, {
+          name: `Before ${who} ${step.kind} · ${ticket}`,
+          git_sha: cp.sha,
+          git_ref: cp.ref,
+          created_by: "agent",
+          step_id: step.step_id,
+        });
+        if (rec) debug("checkpoint recorded", rec.id);
+      }
       if (wt) wt.baseSha = (await headSha(cwd)) ?? wt.baseSha;
     }
   } catch (e) {
@@ -231,6 +249,7 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
       step,
       cwd,
       signal: ac.signal,
+      ...(deps.env && Object.keys(deps.env).length ? { env: deps.env } : {}),
       onEvent: (e) => {
         batcher.push(e);
         const category = typeof e.data?.approval_needed === "string" ? e.data.approval_needed : null;
@@ -255,10 +274,17 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   deps.signal.removeEventListener("abort", onAbort);
 
   let diff: DiffResult | undefined;
-  try {
-    diff = wt ? await finalizeWorktree(wt.path, wt.baseSha, `agnt0: ${ticket} ${step.role}`) : await measureRoot(repoRoot);
-  } catch (e) {
-    debug("diff failed", e);
+  if (isAudit) {
+    const after = await porcelain(repoRoot);
+    if (statusBefore !== null && after !== null && after !== statusBefore) {
+      log(pc.yellow(`  ! The audit changed files in your repo (it should be read-only). Review them with \`git status\`.`));
+    }
+  } else {
+    try {
+      diff = wt ? await finalizeWorktree(wt.path, wt.baseSha, `agnt0: ${ticket} ${step.role}`) : await measureRoot(repoRoot);
+    } catch (e) {
+      debug("diff failed", e);
+    }
   }
 
   const interrupted = deps.signal.aborted || result.error === "interrupted";
@@ -294,5 +320,33 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   const tok = body.usage.input_tokens + body.usage.output_tokens;
   const files = diff ? ` · ${diff.files_changed} files +${diff.lines_added} -${diff.lines_removed}` : "";
   log(`${outcome === "succeeded" ? pc.green("✓") : pc.red("✗")} ${who} ${pc.dim(`${secs}s · ${tok.toLocaleString()} tokens${files} · ${res.credits_charged} credits`)}${error ? pc.red(` ${truncate(error, 200)}`) : ""}`);
+  if (isAudit && outcome === "succeeded") for (const l of auditSummaryLines(output, deps.webUrl, step.project_id)) log(l);
   return interrupted ? "interrupted" : res;
+}
+
+async function porcelain(root: string): Promise<string | null> {
+  try {
+    return await git(root, ["status", "--porcelain", "--untracked-files=all"]);
+  } catch {
+    return null;
+  }
+}
+
+/** "Code health 72/100 · 3 high · dead code 4, unwired call 1" + where to read the report. */
+export function auditSummaryLines(output: unknown, webUrl: string, projectId: string): string[] {
+  const parsed = AuditOutput.safeParse(output);
+  if (!parsed.success) return [pc.dim(`  Audit report: ${webUrl}/p/${projectId}/code-health`)];
+  const a = parsed.data;
+  const byKind = new Map<string, number>();
+  for (const f of a.findings) byKind.set(f.kind, (byKind.get(f.kind) ?? 0) + 1);
+  const high = a.findings.filter((f) => f.severity === "high").length;
+  const kinds = [...byKind].sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k.replace(/_/g, " ")} ${n}`);
+  const score = Math.round(a.score.overall);
+  const color = score >= 80 ? pc.green : score >= 50 ? pc.yellow : pc.red;
+  return [
+    `  ${pc.bold("Code health")} ${color(`${score}/100`)} ${pc.dim("·")} ${a.findings.length} finding${a.findings.length === 1 ? "" : "s"}${high ? ` ${pc.dim("·")} ${pc.red(`${high} high`)}` : ""}`,
+    ...(kinds.length ? [`  ${pc.dim(kinds.join(" · "))}`] : []),
+    `  ${pc.dim(truncate(a.summary.split("\n")[0] ?? "", 160))}`,
+    `  ${pc.dim("Report:")} ${webUrl}/p/${projectId}/code-health ${pc.dim("(pick findings to turn into tickets)")}`,
+  ];
 }

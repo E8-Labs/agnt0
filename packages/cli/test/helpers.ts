@@ -11,6 +11,9 @@ export interface RecordedRequest {
   path: string;
   headers: IncomingMessage["headers"];
   body: any;
+  /** Raw request body (for binary uploads such as signed blob PUTs). */
+  raw: Buffer;
+  query: URLSearchParams;
 }
 
 export type Handler = (req: RecordedRequest) => { status?: number; body?: unknown; headers?: Record<string, string> } | undefined;
@@ -28,10 +31,20 @@ export async function startMockApi(): Promise<MockApi> {
   const routes = new Map<string, Handler>();
   const requests: RecordedRequest[] = [];
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
-    const path = (req.url ?? "/").split("?")[0] ?? "/";
-    const rec: RecordedRequest = { method: req.method ?? "GET", path, headers: req.headers, body: raw ? JSON.parse(raw) : undefined };
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const buf = Buffer.concat(chunks);
+    const [path = "/", qs = ""] = (req.url ?? "/").split("?");
+    const isJson = !req.headers["content-type"] || /json/.test(req.headers["content-type"]);
+    let body: unknown;
+    if (buf.length && isJson) {
+      try {
+        body = JSON.parse(buf.toString("utf8"));
+      } catch {
+        body = undefined;
+      }
+    }
+    const rec: RecordedRequest = { method: req.method ?? "GET", path, headers: req.headers, body, raw: buf, query: new URLSearchParams(qs) };
     requests.push(rec);
     const h = routes.get(`${rec.method} ${path}`);
     const out = h?.(rec);

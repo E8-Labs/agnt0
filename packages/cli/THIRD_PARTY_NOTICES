@@ -10,8 +10,10 @@ distribution, together with the license notices those components require
 LICENSE and NOTICE for caveman, with changed files marked as Apache-2.0 requires).
 
 Runtime dependencies that npm installs separately (commander, ink, react, execa,
-@napi-rs/keyring, open, picocolors, ws, zod) are not bundled into dist/ and carry their
-own license files in node_modules.
+@napi-rs/keyring, open, picocolors, ws, zod, playwright-core (Apache-2.0), qrcode (MIT))
+are not bundled into dist/ and carry their own license files in node_modules. Chromium,
+which `agnt0 qa` installs on first use through Playwright, is downloaded separately and
+is covered by its own licenses.
 
 Bundled / adapted components
 ----------------------------

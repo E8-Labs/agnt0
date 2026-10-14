@@ -96,6 +96,14 @@ export default function WatchApp({ projectLabel, source }: { projectLabel: strin
         </Box>
       ) : null}
 
+      {state.restore ? (
+        <Box borderStyle="single" borderColor="cyan" paddingX={1}>
+          <Text color="cyan">
+            ↺ Rollback requested: {state.restore.checkpoint.name} · run <Text bold>agnt0 rollback {state.restore.checkpoint.id}</Text> in another terminal
+          </Text>
+        </Box>
+      ) : null}
+
       <Box marginTop={1} flexWrap="wrap">
         {state.tiles.length === 0 ? <Text dimColor>No agents running yet. Start one with `agnt0 run`.</Text> : state.tiles.map((t) => <Tile key={t.stepId} t={t} now={now} width={tileWidth} />)}
       </Box>

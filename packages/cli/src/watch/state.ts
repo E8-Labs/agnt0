@@ -1,4 +1,4 @@
-import { ROLE_LABELS, type LimitReached, type RealtimeEvent, type Role, type Ticket, type UsageSnapshot } from "@agnt0/protocol";
+import { ROLE_LABELS, type Checkpoint, type LimitReached, type RealtimeEvent, type Role, type Ticket, type UsageSnapshot } from "@agnt0/protocol";
 
 export interface AgentTile {
   stepId: string;
@@ -28,6 +28,8 @@ export interface WatchState {
   limit: LimitReached | null;
   cliState: "idle" | "running" | "paused" | null;
   connection: "connecting" | "open" | "closed";
+  /** Rollback requested from the dashboard: shown as a banner with the command to run (never auto-run). */
+  restore: { checkpoint: Checkpoint; requestedAt: string } | null;
 }
 
 export const initialWatchState: WatchState = {
@@ -39,6 +41,7 @@ export const initialWatchState: WatchState = {
   limit: null,
   cliState: null,
   connection: "connecting",
+  restore: null,
 };
 
 const MAX_FEED = 50;
@@ -98,6 +101,14 @@ export function reduceWatch(state: WatchState, ev: RealtimeEvent): WatchState {
       return { ...state, cliState: ev.state };
     case "onboarding.updated":
       return state;
+    case "checkpoint.restore_requested":
+      return {
+        ...state,
+        restore: { checkpoint: ev.checkpoint, requestedAt: ev.requested_at },
+        feed: pushFeed(state.feed, { at: ev.requested_at, kind: "restore", text: `rollback requested: run agnt0 rollback ${ev.checkpoint.id}` }),
+      };
+    case "checkpoint.created":
+      return { ...state, feed: pushFeed(state.feed, { at: ev.checkpoint.created_at, kind: "checkpoint", text: `checkpoint ${ev.checkpoint.name}` }) };
     default:
       // Newer event types (notifications, checkpoints, preview, QA, audit) are shown in the feed generically.
       return { ...state, feed: pushFeed(state.feed, { at: new Date().toISOString(), kind: "event", text: ev.type.replace(".", " ") }) };

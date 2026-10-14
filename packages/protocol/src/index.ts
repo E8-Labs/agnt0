@@ -830,3 +830,24 @@ export const m2routes = {
   auditFindingsTicket: (auditId: string) => `/v1/audits/${auditId}/findings/ticket`,
   auditFindingsDismiss: (auditId: string) => `/v1/audits/${auditId}/findings/dismiss`,
 } as const;
+
+// added by api — type aliases for the M1/M2 response schemas above (types only; no wire change).
+export type CheckpointList = z.infer<typeof CheckpointList>;
+export type RestoreResponse = z.infer<typeof RestoreResponse>;
+export type NotificationList = z.infer<typeof NotificationList>;
+export type EnvVarMeta = z.infer<typeof EnvVarMeta>;
+export type EnvKeysResponse = z.infer<typeof EnvKeysResponse>;
+export type EnvPullResponse = z.infer<typeof EnvPullResponse>;
+export type SignedUpload = z.infer<typeof SignedUpload>;
+export type QaRunCreated = z.infer<typeof QaRunCreated>;
+export type QaRunList = z.infer<typeof QaRunList>;
+export type QaRunDetail = z.infer<typeof QaRunDetail>;
+export type AuditList = z.infer<typeof AuditList>;
+export type AuditDetail = z.infer<typeof AuditDetail>;
+export type AuditFindingTicketResponse = z.infer<typeof AuditFindingTicketResponse>;
+
+// added by api — POST /v1/audits/{id}/skip (no body) → AuditRun with status "skipped"; 409 when the audit
+// is no longer queued/running. Lets a linked project's Planner start without waiting for the audit.
+export const m2routesApi = {
+  auditSkip: (auditId: string) => `/v1/audits/${auditId}/skip`,
+} as const;

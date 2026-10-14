@@ -36,7 +36,7 @@ export class ClaudeRunner implements RunnerAdapter {
     return (await commandVersion(this.bin)) !== null;
   }
 
-  async run({ step, cwd, signal, onEvent }: RunnerInput): Promise<RunnerResult> {
+  async run({ step, cwd, signal, onEvent, env }: RunnerInput): Promise<RunnerResult> {
     const parser = new ClaudeStreamParser(CLAUDE_MODEL_ALIASES[step.model]);
     const args = claudeArgs(step); // throws on an unsafe tool grant before anything runs
     const proc = await runLines(this.bin, args, {
@@ -44,6 +44,7 @@ export class ClaudeRunner implements RunnerAdapter {
       input: step.prompt,
       signal,
       onLine: (line) => parser.push(line).forEach(onEvent),
+      env,
     });
     const usage = parser.usage();
     const finalText = parser.finalText();
