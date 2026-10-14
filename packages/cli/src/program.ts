@@ -20,6 +20,15 @@ import { CLI_VERSION } from "./version.js";
 
 type Action = (ctx: Context, ...args: any[]) => Promise<unknown>;
 
+/** `-j/--parallel`: a whole number of agents, 1 to 8 (the protocol's cap on a lease request). */
+function parallelOption(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 8) {
+    throw new CommanderError(1, "agnt0.parallel", `--parallel must be a whole number from 1 to 8, got ${JSON.stringify(raw)}`);
+  }
+  return n;
+}
+
 export function buildProgram(makeContext: () => Context = () => createContext()): Command {
   const program = new Command();
 
@@ -97,7 +106,8 @@ export function buildProgram(makeContext: () => Context = () => createContext())
     .description("start or resume the build loop with your own runner")
     .option("--watch", "keep polling for work when idle or paused")
     .option("--once", "run at most one step, then stop")
-    .action(wrap((ctx, o: { watch?: boolean; once?: boolean }) => runCommand(ctx, o)));
+    .option("-j, --parallel <n>", "run up to n agents at once (default 1; your plan's limit applies)", parallelOption)
+    .action(wrap((ctx, o: { watch?: boolean; once?: boolean; parallel?: number }) => runCommand(ctx, o)));
 
   program.command("watch").description("full-screen live view of your agents").action(wrap((ctx) => watchCommand(ctx)));
 

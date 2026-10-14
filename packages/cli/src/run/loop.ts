@@ -38,6 +38,11 @@ export interface RunLoopOptions {
   webUrl: string;
   runners: RunnerAdapter[];
   watch?: boolean;
+  /**
+   * How many steps to run at once (default 1). The server clamps this to the project's and the
+   * plan's own agent limits, so asking for more than the account allows is harmless.
+   */
+  parallel?: number;
   /** Stop after this many steps (tests, `--once`). */
   maxSteps?: number;
   signal?: AbortSignal;
@@ -86,22 +91,109 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunExit> {
     }
   };
 
+  const parallel = Math.max(1, Math.min(MAX_PARALLEL, Math.trunc(opts.parallel ?? 1)));
+
   let steps = 0;
   let creditsThisRun = 0;
   let offlineSince: number | null = null;
+
+  /**
+   * Steps running right now. With `parallel > 1` the loop keeps leasing until either the slots are
+   * full or the server says there is nothing ready, then waits for one to finish before asking again.
+   */
+  const inflight = new Set<Promise<Outcome>>();
+  /** Set once something says to stop starting new work; in-flight steps still finish and report. */
+  let stopLeasing: RunExit | null = null;
+  let failure: unknown = null;
+
+  const startStep = (step: Step) => {
+    steps++;
+    currentRunner = step.runner;
+    setState("running");
+    const stepLog = parallel > 1 ? taggedLog(log, step) : log;
+    const p: Promise<Outcome> = executeStep(step, { ...opts, log: stepLog, signal, available }).then(
+      (res) => ({ step, res }),
+      (err: unknown) => ({ step, err }),
+    );
+    inflight.add(p);
+  };
+
+  /** Waits for the first in-flight step to finish and applies its result. */
+  const settleOne = async (): Promise<void> => {
+    if (!inflight.size) return; // Promise.race([]) would never settle.
+    const { p, out } = await Promise.race([...inflight].map(async (p) => ({ p, out: await p })));
+    inflight.delete(p);
+
+    if ("err" in out) {
+      // Keep the first error, stop taking new work, let the others report themselves, rethrow after.
+      failure ??= out.err;
+      stopLeasing ??= { status: "interrupted" };
+      return;
+    }
+    const res = out.res;
+    if (res === "interrupted") {
+      stopLeasing ??= { status: "interrupted" };
+      return;
+    }
+    creditsThisRun += res.credits_charged;
+    for (const w of usageWarnings(res.usage)) log(w);
+    if (res.next === "pause_limit") {
+      setState("paused");
+      log(`${pc.yellow("⏸")}  Paused: usage limit reached. Run ${pc.cyan("agnt0 usage")} for the reset time, or ${pc.cyan("agnt0 credits use")} / ${pc.cyan("agnt0 upgrade")} to keep going.`);
+      stopLeasing ??= { status: "paused", code: "limit_reached" };
+    }
+    if (opts.maxSteps !== undefined && steps >= opts.maxSteps) {
+      stopLeasing ??= { status: "idle", reason: "max_steps", message: `Stopped after ${steps} step(s).` };
+    }
+  };
+
+  /** Lets every running step finish and report before the loop returns. */
+  const drain = async (): Promise<void> => {
+    while (inflight.size) await settleOne();
+  };
+
   try {
     for (;;) {
-      if (signal.aborted) return { status: "interrupted" };
+      if (signal.aborted) {
+        await drain();
+        if (failure) throw failure;
+        return { status: "interrupted" };
+      }
+      // Something asked us to stop: let the running steps report, then return that reason.
+      if (stopLeasing) {
+        await drain();
+        if (failure) throw failure;
+        // `watch` keeps going after a pause, but only once nothing is in flight.
+        if (stopLeasing.status === "paused" && opts.watch) {
+          const resume = stopLeasing;
+          stopLeasing = null;
+          await sleep(opts.pausePollMs ?? 60_000);
+          if (signal.aborted) return { status: "interrupted" };
+          debug("resuming after pause", resume.code);
+          continue;
+        }
+        return stopLeasing;
+      }
+      // All slots busy: wait for one before asking for more work.
+      if (inflight.size >= parallel) {
+        await settleOne();
+        continue;
+      }
+
       let next: StepNextResponse;
       try {
         next = await api.post(routes.stepsNext(projectId), {
-          body: { runner_available: runnerIds, repo_sha: await headSha(repoRoot), max_parallel: 1 },
+          body: { runner_available: runnerIds, repo_sha: await headSha(repoRoot), max_parallel: parallel },
           schema: StepNextResponse,
           signal,
         });
         offlineSince = null;
       } catch (e) {
-        if (signal.aborted) return { status: "interrupted" };
+        if (signal.aborted) {
+          await drain();
+          if (failure) throw failure;
+          return { status: "interrupted" };
+        }
         if (e instanceof NetworkError) {
           // Ride out network blips for up to 30 minutes instead of killing the run.
           offlineSince ??= Date.now();
@@ -113,16 +205,19 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunExit> {
         if (e instanceof ApiHttpError && e.status === 402) {
           setState("paused");
           for (const l of pauseMessage(e, opts.webUrl)) log(l);
-          if (opts.watch) {
-            await sleep(opts.pausePollMs ?? 60_000);
-            continue;
-          }
-          return { status: "paused", code: e.code ?? "payment_required" };
+          stopLeasing ??= { status: "paused", code: e.code ?? "payment_required" };
+          continue;
         }
         throw e;
       }
 
       if (next.kind === "idle") {
+        // Nothing ready *yet* is not the same as nothing to do: a step still running will unlock the
+        // tickets that depend on it, so wait for it rather than reporting the project idle.
+        if (inflight.size) {
+          await settleOne();
+          continue;
+        }
         setState("idle");
         log(`${pc.dim("idle")} ${pc.bold(next.reason.replace(/_/g, " "))}: ${next.message}`);
         if (opts.watch && next.reason !== "all_done") {
@@ -139,28 +234,29 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunExit> {
         return { status: "idle", reason: next.reason, message: next.message };
       }
 
-      const step = next.step;
-      currentRunner = step.runner;
-      setState("running");
-      const res = await executeStep(step, { ...opts, log, signal, available });
-      steps++;
-      if (res === "interrupted") return { status: "interrupted" };
-      creditsThisRun += res.credits_charged;
-      for (const w of usageWarnings(res.usage)) log(w);
-      if (res.next === "pause_limit") {
-        setState("paused");
-        log(`${pc.yellow("⏸")}  Paused: usage limit reached. Run ${pc.cyan("agnt0 usage")} for the reset time, or ${pc.cyan("agnt0 credits use")} / ${pc.cyan("agnt0 upgrade")} to keep going.`);
-        if (opts.watch) {
-          await sleep(opts.pausePollMs ?? 60_000);
-          continue;
-        }
-        return { status: "paused", code: "limit_reached" };
-      }
-      if (opts.maxSteps !== undefined && steps >= opts.maxSteps) return { status: "idle", reason: "max_steps", message: `Stopped after ${steps} step(s).` };
+      startStep(next.step);
+      // One slot is the sequential loop: finish this step before asking for the next.
+      if (parallel === 1) await settleOne();
+      else if (opts.maxSteps !== undefined && steps >= opts.maxSteps) stopLeasing ??= { status: "idle", reason: "max_steps", message: `Stopped after ${steps} step(s).` };
     }
   } finally {
     clearInterval(hb);
   }
+}
+
+/** The protocol caps a lease request at 8 agents. */
+const MAX_PARALLEL = 8;
+
+type Outcome = { step: Step; res: StepCompleteResponse | "interrupted" } | { step: Step; err: unknown };
+
+/**
+ * Several agents running at once interleave their output, so each line says which ticket it came
+ * from. Short enough to stay out of the way: `tkt_dhz8ibx1t1shejvb` prints as `[dhz8ib]`.
+ */
+function taggedLog(log: (line: string) => void, step: Step): (line: string) => void {
+  const id = step.ticket_id ? step.ticket_id.replace(/^tkt_/, "").slice(0, 6) : step.kind;
+  const tag = pc.dim(`[${id}]`);
+  return (line: string) => log(`${tag} ${line}`);
 }
 
 interface ExecDeps extends RunLoopOptions {

@@ -18,7 +18,7 @@ export function restoreRequestedLines(ev: Extract<RealtimeEvent, { type: "checkp
   ];
 }
 
-export async function runCommand(ctx: Context, opts: { watch?: boolean; once?: boolean }): Promise<RunExit> {
+export async function runCommand(ctx: Context, opts: { watch?: boolean; once?: boolean; parallel?: number }): Promise<RunExit> {
   await requireLogin(ctx);
   const project = await requireProject();
   if (!(await isGitRepo(project.root))) throw new CliError(`${project.root} isn't a git repository.`, "Run `git init` there, or `agnt0 init` again.");
@@ -72,6 +72,8 @@ export async function runCommand(ctx: Context, opts: { watch?: boolean; once?: b
       webUrl: ctx.webUrl,
       runners: [new ClaudeRunner(), new CodexRunner()],
       watch: opts.watch,
+      // `--once` means one step, so it overrides a parallel request rather than racing several.
+      parallel: opts.once ? 1 : opts.parallel,
       maxSteps: opts.once ? 1 : undefined,
       signal: ac.signal,
       env,

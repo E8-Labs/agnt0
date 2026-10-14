@@ -127,6 +127,78 @@ describe("agnt0 run", () => {
     expect(out.text()).toContain("2 tickets wait for your approval");
   });
 
+  it("runs several steps at once, tags their output and waits for them before reporting idle", async () => {
+    const ids = ["tkt_aaaaaa1", "tkt_bbbbbb2", "tkt_cccccc3"];
+    // Three tickets ready, then the server says nothing is ready while they are still running.
+    const queue = ids.map((id, i) => ({
+      kind: "step",
+      step: step({ step_id: `stp_${i + 1}`, ticket_id: id, worktree: `.agnt0/wt/${id}`, branch: `agnt0/${id}` }),
+    }));
+    api.on("POST", routes.stepsNext("prj_1"), () => ({ body: queue.shift() ?? { kind: "idle", reason: "no_ready_tickets", message: "Nothing ready" } }));
+    api.on("POST", routes.stepEvents(""), () => ({ status: 202, body: { accepted: 1 } }));
+    for (let i = 1; i <= 3; i++) {
+      api.on("POST", routes.stepComplete(`stp_${i}`), () => ({ body: { credits_charged: 2, next: "continue", usage: usageSnapshot() } }));
+    }
+
+    // Each step blocks until released, so all three can only finish if they really ran together.
+    let peak = 0;
+    let running = 0;
+    const release: Array<() => void> = [];
+    const started: string[] = [];
+    const runner = new FakeRunner(async (input) => {
+      started.push(input.step.ticket_id!);
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise<void>((r) => release.push(r));
+      running--;
+      return { ok: true, finalText: "done", usage };
+    });
+
+    const out = captureLog();
+    const ctx = makeCtx(api.url);
+    const loop = runLoop({ api: ctx.api, projectId: "prj_1", repoRoot: dir, webUrl: "w", runners: [runner], log: out.log, parallel: 3 });
+
+    // Wait for all three to be in flight, then let them go.
+    for (let i = 0; i < 200 && release.length < 3; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(release).toHaveLength(3);
+    for (const r of release) r();
+
+    const exit = await loop;
+    expect(exit).toMatchObject({ status: "idle", reason: "no_ready_tickets" });
+    expect(peak).toBe(3);
+    expect(new Set(started)).toEqual(new Set(ids));
+
+    // It asked for three slots, and each line says which ticket it belongs to.
+    const next = api.requests.find((r) => r.path === routes.stepsNext("prj_1"))!;
+    expect(next.body).toMatchObject({ max_parallel: 3 });
+    const text = out.text();
+    for (const id of ids) expect(text).toContain(`[${id.replace("tkt_", "").slice(0, 6)}]`);
+  });
+
+  it("keeps one slot sequential and untagged by default", async () => {
+    const queue = [
+      { kind: "step", step: step({ step_id: "stp_1", ticket_id: "tkt_aaaaaa1" }) },
+      { kind: "idle", reason: "all_done", message: "Every ticket is done." },
+    ];
+    api.on("POST", routes.stepsNext("prj_1"), () => ({ body: queue.shift() }));
+    api.on("POST", routes.stepEvents(""), () => ({ status: 202, body: { accepted: 1 } }));
+    api.on("POST", routes.stepComplete("stp_1"), () => ({ body: { credits_charged: 2, next: "continue", usage: usageSnapshot() } }));
+    let peak = 0;
+    let running = 0;
+    const runner = new FakeRunner(async () => {
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 10));
+      running--;
+      return { ok: true, finalText: "done", usage };
+    });
+    const out = captureLog();
+    await runLoop({ api: makeCtx(api.url).api, projectId: "prj_1", repoRoot: dir, webUrl: "w", runners: [runner], log: out.log });
+    expect(peak).toBe(1);
+    expect(api.requests.find((r) => r.path === routes.stepsNext("prj_1"))!.body).toMatchObject({ max_parallel: 1 });
+    expect(out.text()).not.toContain("[aaaaaa");
+  });
+
   it("runs a step in its worktree, streams events, commits the work and completes it", async () => {
     const steps = [{ kind: "step", step: step() }, { kind: "idle", reason: "no_ready_tickets", message: "Nothing ready" }];
     api.on("POST", routes.stepsNext("prj_1"), () => ({ body: steps.shift() }));
