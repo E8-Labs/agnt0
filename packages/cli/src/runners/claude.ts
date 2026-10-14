@@ -1,25 +1,28 @@
 import type { Step } from "@agnt0/protocol";
 import { ClaudeStreamParser } from "./claude-stream.js";
 import { commandVersion, runLines } from "./spawn.js";
-import { CLAUDE_MODEL_ALIASES, mapAllowedToolsForClaude } from "./tools.js";
+import { CLAUDE_MODEL_ALIASES, mapClaudePermissions } from "./tools.js";
 import type { RunnerAdapter, RunnerInput, RunnerResult } from "./types.js";
 
 export function claudeArgs(step: Step): string[] {
+  const perms = mapClaudePermissions(step.allowed_tools, step.scope, step.approval.requires_approval);
   const args = [
     "-p",
     "--output-format",
     "stream-json",
     "--verbose",
+    // Keep the step prompt off disk (~/.claude/projects/*.jsonl).
+    "--no-session-persistence",
     "--max-turns",
-    String(Math.max(1, step.max_turns)),
+    String(Math.max(1, Math.min(500, Math.trunc(step.max_turns)))),
     "--model",
     CLAUDE_MODEL_ALIASES[step.model],
-    "--permission-mode",
-    "acceptEdits",
   ];
-  const tools = mapAllowedToolsForClaude(step.allowed_tools, step.scope);
-  // Variadic flag goes last; the prompt itself is sent on stdin.
-  if (tools.length) args.push("--allowedTools", ...tools);
+  if (perms.permissionMode) args.push("--permission-mode", perms.permissionMode);
+  // `--flag=value` keeps every rule attached to its flag, so no value can ever be read as an option.
+  for (const t of perms.allowed) args.push(`--allowedTools=${t}`);
+  for (const t of perms.disallowed) args.push(`--disallowedTools=${t}`);
+  // The prompt itself is sent on stdin.
   return args;
 }
 
@@ -35,7 +38,8 @@ export class ClaudeRunner implements RunnerAdapter {
 
   async run({ step, cwd, signal, onEvent }: RunnerInput): Promise<RunnerResult> {
     const parser = new ClaudeStreamParser(CLAUDE_MODEL_ALIASES[step.model]);
-    const proc = await runLines(this.bin, claudeArgs(step), {
+    const args = claudeArgs(step); // throws on an unsafe tool grant before anything runs
+    const proc = await runLines(this.bin, args, {
       cwd,
       input: step.prompt,
       signal,

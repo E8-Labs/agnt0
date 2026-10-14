@@ -1,4 +1,5 @@
 import type { StepEvent, TokenUsage } from "@agnt0/protocol";
+import { categorizeDenial } from "./tools.js";
 import { zeroUsage } from "./types.js";
 
 type Json = Record<string, unknown>;
@@ -36,6 +37,9 @@ function trimInput(input: unknown): Record<string, unknown> {
   }
   return out;
 }
+
+/** Claude Code's wording when a tool call is blocked by permissions (deny rule or not allowed in -p). */
+const DENIAL_TEXT = /permission to use .* (has been|was) denied|haven't granted it|requested permissions? to use|not allowed|denied by/i;
 
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const BROWSE_TOOLS = new Set(["WebFetch", "WebSearch"]);
@@ -76,6 +80,11 @@ export class ClaudeStreamParser {
   numTurns = 0;
   lastAssistantText = "";
   sessionId: string | null = null;
+  /** tool_use id → call, so denials can be explained. */
+  private toolCalls = new Map<string, { name: string; input: unknown }>();
+  private deniedIds = new Set<string>();
+  /** Approval categories the agent ran into (deduped, in order). */
+  readonly approvalsNeeded: string[] = [];
 
   constructor(
     defaultModel: string,
@@ -114,6 +123,7 @@ export class ClaudeStreamParser {
             this.lastAssistantText = block.text;
             events.push({ type: "message", summary: short(block.text.trim(), 2000), at });
           } else if (block.type === "tool_use" && typeof block.name === "string") {
+            if (typeof block.id === "string") this.toolCalls.set(block.id, { name: block.name, input: block.input });
             events.push(toolUseToEvent(block.name, block.input, at));
           }
         }
@@ -124,7 +134,14 @@ export class ClaudeStreamParser {
         const content = Array.isArray(m.content) ? (m.content as Json[]) : [];
         for (const block of content) {
           if (block.type === "tool_result" && block.is_error === true) {
-            events.push({ type: "log", summary: short(`Tool error: ${short(block.content, 400)}`, 2000), at });
+            const text = typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+            const id = typeof block.tool_use_id === "string" ? block.tool_use_id : null;
+            if (id && DENIAL_TEXT.test(text)) {
+              const ev = this.denial(id, at);
+              if (ev) events.push(ev);
+            } else {
+              events.push({ type: "log", summary: short(`Tool error: ${short(block.content, 400)}`, 2000), at });
+            }
           }
         }
         break;
@@ -135,10 +152,34 @@ export class ClaudeStreamParser {
         this.isError = msg.is_error === true;
         this.subtype = typeof msg.subtype === "string" ? msg.subtype : null;
         this.numTurns = num(msg.num_turns);
+        if (Array.isArray(msg.permission_denials)) {
+          for (const d of msg.permission_denials as Json[]) {
+            const id = typeof d.tool_use_id === "string" ? d.tool_use_id : `denial-${this.deniedIds.size}`;
+            if (!this.toolCalls.has(id) && typeof d.tool_name === "string") this.toolCalls.set(id, { name: d.tool_name, input: d.tool_input });
+            const ev = this.denial(id, at);
+            if (ev) events.push(ev);
+          }
+        }
         break;
       }
     }
     return events;
+  }
+
+  /** One `log` event per denied call, tagged with its approval category when it has one. */
+  private denial(id: string, at: string): StepEvent | null {
+    if (this.deniedIds.has(id)) return null;
+    this.deniedIds.add(id);
+    const call = this.toolCalls.get(id) ?? { name: "unknown", input: undefined };
+    const category = categorizeDenial(call.name, call.input);
+    const what = toolUseToEvent(call.name, call.input, at).summary;
+    if (category && !this.approvalsNeeded.includes(category)) this.approvalsNeeded.push(category);
+    return {
+      type: "log",
+      summary: short(category ? `needs approval: ${category} (${what})` : `blocked: ${what} is not allowed in this step`, 2000),
+      at,
+      data: { permission_denied: true, tool: call.name, ...(category ? { approval_needed: category } : {}) },
+    };
   }
 
   get sawResult(): boolean {

@@ -8,7 +8,7 @@ import { statusCommand } from "./commands/status.js";
 import { usageCommand } from "./commands/usage.js";
 import { watchCommand } from "./commands/watch.js";
 import { creditsBuyCommand, creditsUseCommand, openCommand, upgradeCommand } from "./commands/web.js";
-import { setApiOverride } from "./config.js";
+import { setApiOverride, setInsecure } from "./config.js";
 import { createContext, type Context } from "./context.js";
 import { printError } from "./errors.js";
 import { CLI_VERSION } from "./version.js";
@@ -33,10 +33,12 @@ export function buildProgram(makeContext: () => Context = () => createContext())
     .description("Agent Zero: build apps from your terminal with your own Claude Code or Codex.")
     .version(CLI_VERSION, "-v, --version", "print the agnt0 version")
     .option("--api <url>", "Agent Zero API base URL (default: $AGNT0_API_URL or http://localhost:8787)")
+    .option("--insecure", "allow a plain-http API URL that isn't localhost")
     .showHelpAfterError("(run `agnt0 --help` for usage)")
     .hook("preAction", (cmd) => {
-      const api = cmd.opts<{ api?: string }>().api;
-      if (api) setApiOverride(api);
+      const o = cmd.opts<{ api?: string; insecure?: boolean }>();
+      if (o.api) setApiOverride(o.api);
+      if (o.insecure) setInsecure(true);
     });
 
   program

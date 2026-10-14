@@ -512,6 +512,9 @@ export const routes = {
   guideMessages: "/v1/guide/messages",
   guideHistory: "/v1/guide/sessions/current",
   realtime: (id: string) => `/v1/rt/projects/${id}`,
+  // added by api
+  rtTicket: "/v1/rt/ticket",
+  ticketDecision: (projectId: string, ticketId: string) => `/v1/projects/${projectId}/tickets/${ticketId}/decision`,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -610,3 +613,14 @@ export const ProjectPatch = z.object({
     .optional(),
 });
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
+
+// added by api — POST /v1/rt/ticket: a single-use, user-bound ticket for opening a realtime socket from the
+// browser (wss://<api>/v1/rt/...?ticket=...). Web session tokens are not accepted on the socket; CLI access
+// tokens still are (?token=).
+export const RtTicketResponse = z.object({ ticket: z.string(), expires_in_s: z.number().int() });
+export type RtTicketResponse = z.infer<typeof RtTicketResponse>;
+
+// added by api — POST /v1/projects/{id}/tickets/{ticketId}/decision for tickets in `approval`
+// (approve → ready, reject → blocked). Responds with Ticket; 409 when the ticket is not awaiting a decision.
+export const TicketDecisionRequest = z.object({ decision: z.enum(["approve", "reject"]) });
+export type TicketDecisionRequest = z.infer<typeof TicketDecisionRequest>;

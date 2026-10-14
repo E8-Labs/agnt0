@@ -224,18 +224,34 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   }
 
   let lastShown = 0;
-  const result = await runner.run({
-    step,
-    cwd,
-    signal: ac.signal,
-    onEvent: (e) => {
-      batcher.push(e);
-      if (e.type !== "message" && Date.now() - lastShown > 250) {
-        lastShown = Date.now();
-        log(pc.dim(`  ${truncate(e.summary.split("\n")[0] ?? "", 100)}`));
-      }
-    },
-  });
+  const approvals: string[] = [];
+  let result: Awaited<ReturnType<RunnerAdapter["run"]>>;
+  try {
+    result = await runner.run({
+      step,
+      cwd,
+      signal: ac.signal,
+      onEvent: (e) => {
+        batcher.push(e);
+        const category = typeof e.data?.approval_needed === "string" ? e.data.approval_needed : null;
+        if (category) {
+          if (!approvals.includes(category)) approvals.push(category);
+          log(`  ${pc.yellow("needs approval:")} ${category} ${pc.dim(truncate(e.summary.replace(/^needs approval: \S+ /, ""), 100))}`);
+        } else if (e.data?.permission_denied === true) {
+          log(`  ${pc.yellow(truncate(e.summary, 120))}`);
+        } else if (e.type !== "message" && Date.now() - lastShown > 250) {
+          lastShown = Date.now();
+          log(pc.dim(`  ${truncate(e.summary.split("\n")[0] ?? "", 100)}`));
+        }
+      },
+    });
+  } catch (e) {
+    deps.signal.removeEventListener("abort", onAbort);
+    const msg = e instanceof Error ? e.message : String(e);
+    log(pc.red(`  ${msg}`));
+    const res = await fail(msg);
+    return deps.signal.aborted ? "interrupted" : res;
+  }
   deps.signal.removeEventListener("abort", onAbort);
 
   let diff: DiffResult | undefined;
@@ -249,12 +265,18 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   let output: unknown;
   let outcome: "succeeded" | "failed" = result.ok && !interrupted ? "succeeded" : "failed";
   let error = interrupted ? "interrupted" : result.error;
+
   if (outcome === "succeeded" && step.output_schema) {
     output = extractJsonOutput(result.finalText);
     if (output === undefined) {
       outcome = "failed";
       error = `The ${step.output_schema} step finished without printing the required JSON output.`;
     }
+  }
+
+  if (approvals.length && outcome === "failed" && !interrupted) {
+    const note = `Blocked actions need approval: ${approvals.join(", ")}.`;
+    error = error ? `${error} ${note}` : note;
   }
 
   const body: StepCompleteRequest = {

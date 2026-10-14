@@ -1,4 +1,5 @@
 import type { StepEvent, TokenUsage } from "@agnt0/protocol";
+import type { Step } from "@agnt0/protocol";
 import { commandVersion, runLines } from "./spawn.js";
 import { zeroUsage, type RunnerAdapter, type RunnerInput, type RunnerResult } from "./types.js";
 
@@ -61,6 +62,16 @@ export class CodexStreamParser {
   }
 }
 
+/** Read-only for steps that only look (plan, review, audit); workspace-write (no network) for builds. */
+export function codexSandbox(step: Pick<Step, "kind">): "read-only" | "workspace-write" {
+  return step.kind === "plan" || step.kind === "review" || step.kind === "audit" ? "read-only" : "workspace-write";
+}
+
+export function codexArgs(step: Pick<Step, "kind">): string[] {
+  // No --full-auto: the sandbox is chosen per step kind. Prompt on stdin ("-").
+  return ["exec", "--json", "--sandbox", codexSandbox(step), "--skip-git-repo-check", "-"];
+}
+
 /** EXPERIMENTAL Codex runner: `codex exec --json` with the prompt on stdin, using the user's Codex login. */
 export class CodexRunner implements RunnerAdapter {
   readonly id = "codex" as const;
@@ -74,7 +85,8 @@ export class CodexRunner implements RunnerAdapter {
   async run({ step, cwd, signal, onEvent }: RunnerInput): Promise<RunnerResult> {
     const parser = new CodexStreamParser();
     // Model tiers are not mapped for Codex yet: the user's configured Codex model is used.
-    const args = ["exec", "--json", "--full-auto", "--skip-git-repo-check", "-"];
+    // requires_approval can't be mapped to per-command rules for Codex yet; the sandbox is the guard.
+    const args = codexArgs(step);
     const proc = await runLines(this.bin, args, { cwd, input: step.prompt, signal, onLine: (l) => parser.push(l).forEach(onEvent) });
     const usage = parser.usage();
     if (proc.aborted) return { ok: false, finalText: parser.lastMessage, usage, error: "interrupted" };

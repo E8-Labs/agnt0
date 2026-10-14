@@ -18,6 +18,16 @@ export function renderUserCode(code: string): string[] {
   return [`  ┌${bar}┐`, `  │${pc.bold(pc.cyan(inner))}│`, `  └${bar}┘`];
 }
 
+/** Only open links that are http(s) and on the configured web app's origin. */
+export function isTrustedVerificationUrl(url: string, webUrl: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.protocol === "https:" || u.protocol === "http:") && u.origin === new URL(webUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 export async function loginCommand(ctx: Context, opts: LoginOptions = {}): Promise<{ email: string }> {
   const log = opts.log ?? ((l: string) => console.log(l));
   if (process.env.AGNT0_TOKEN) log(pc.yellow("! AGNT0_TOKEN is set; it overrides the login stored by this command."));
@@ -35,9 +45,14 @@ export async function loginCommand(ctx: Context, opts: LoginOptions = {}): Promi
       // Plain copy for copy-paste and grep.
       log(`Code: ${s.user_code}`);
       log("");
-      const opened = opts.browser !== false && (await openBrowser(s.verification_uri_complete));
+      const trusted = isTrustedVerificationUrl(s.verification_uri_complete, ctx.webUrl);
+      if (!trusted) {
+        log(pc.yellow(`! The API sent a sign-in link that isn't on ${ctx.webUrl}, so agnt0 won't open it.`));
+        log(pc.yellow(`  Only continue if you trust it, or set AGNT0_WEB_URL to the right web app.`));
+      }
+      const opened = trusted && opts.browser !== false && (await openBrowser(s.verification_uri_complete));
       log(`${opened ? "Opened" : "Open"} ${pc.underline(s.verification_uri_complete)}`);
-      if (!opened) log(pc.dim(`  (or go to ${s.verification_uri} and enter the code)`));
+      if (!opened && isTrustedVerificationUrl(s.verification_uri, ctx.webUrl)) log(pc.dim(`  (or go to ${s.verification_uri} and enter the code)`));
       log(pc.dim("Waiting for approval…"));
     },
   });
