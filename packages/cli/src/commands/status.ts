@@ -40,7 +40,7 @@ async function cachedMe(apiUrl: string): Promise<Me | null> {
 function planLine(u: UsageSnapshot): string {
   if (u.plan === "none") return pc.yellow("none");
   const status = u.subscription_status === "active" ? pc.green("active") : pc.yellow(u.subscription_status.replace("_", " "));
-  return `${u.plan[0]?.toUpperCase()}${u.plan.slice(1)} (${status}) · up to ${u.max_parallel_agents} parallel agents`;
+  return `${u.plan[0]?.toUpperCase()}${u.plan.slice(1)} (${status}) · all agents, up to ${u.max_parallel_agents} at once`;
 }
 
 export async function statusCommand(ctx: Context, opts: { json?: boolean } = {}, log: (l: string) => void = console.log): Promise<void> {

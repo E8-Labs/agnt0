@@ -94,17 +94,44 @@ describe("Claude invocation", () => {
     max_turns: 25,
     allowed_tools: ["read", "write", "bash:npm test", "git"],
     scope: ["src/**"],
+    approval: { requires_approval: ["delete", "install", "push"] },
   } as unknown as Step;
 
   it("builds headless args without the prompt (it goes on stdin)", () => {
     const args = claudeArgs(step);
-    expect(args.slice(0, 11)).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--max-turns", "25", "--model", "opus", "--permission-mode", "acceptEdits", "--allowedTools"]);
-    expect(args).toContain("Bash(npm test:*)");
-    expect(args).toContain("Edit(src/**)");
+    expect(args.slice(0, 9)).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--max-turns", "25", "--model", "opus"]);
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("--allowedTools=Bash(npm test)");
+    expect(args).toContain("--allowedTools=Edit(src/**)");
+    // Every value is glued to its flag, so nothing can be read as an option.
+    for (const a of args.slice(9)) if (a.startsWith("--allowedTools") || a.startsWith("--disallowedTools")) expect(a).toContain("=");
+    expect(args).not.toContain("--allowedTools=Bash");
+  });
+
+  it("turns approval categories into deny rules and never grants an unrestricted shell", () => {
+    const args = claudeArgs(step);
+    expect(args).toContain("--disallowedTools=Bash(rm:*)");
+    expect(args).toContain("--disallowedTools=Bash(npm install:*)");
+    expect(args).toContain("--disallowedTools=Bash(git push:*)");
+    const bare = claudeArgs({ ...step, allowed_tools: ["bash"] } as unknown as Step);
+    expect(bare.some((a) => a === "--allowedTools=Bash")).toBe(false);
+  });
+
+  it("drops acceptEdits when writes need approval", () => {
+    const args = claudeArgs({ ...step, approval: { requires_approval: ["write"] } } as unknown as Step);
+    expect(args).not.toContain("acceptEdits");
+  });
+
+  it("refuses tool grants that look like flags", () => {
+    expect(() => claudeArgs({ ...step, allowed_tools: ["--dangerously-skip-permissions"] } as unknown as Step)).toThrow();
   });
 
   it("maps generic tool grants to Claude permission rules", () => {
-    expect(mapAllowedToolsForClaude(["read", "write", "git", "WebFetch"], [])).toEqual(["Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash(git:*)", "WebFetch"]);
+    const rules = mapAllowedToolsForClaude(["read", "write", "git", "WebFetch"], []);
+    expect(rules).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "LS", "Edit", "Write", "WebFetch", "Bash(git status:*)", "Bash(git diff:*)"]));
+    // "git" means safe read/commit commands only — never push or arbitrary git.
+    expect(rules).not.toContain("Bash(git:*)");
+    expect(rules.some((r) => r.startsWith("Bash(git push"))).toBe(false);
   });
 });
 

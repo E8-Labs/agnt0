@@ -18,7 +18,7 @@ afterEach(async () => {
   await cleanup();
 });
 
-const step = { step_id: "s", prompt: "THE PROMPT", model: "haiku", max_turns: 7, allowed_tools: ["read"], scope: [] } as unknown as Step;
+const step = { step_id: "s", prompt: "THE PROMPT", model: "haiku", max_turns: 7, allowed_tools: ["read"], scope: [], approval: { requires_approval: [] } } as unknown as Step;
 
 describe("ClaudeRunner (fake claude binary)", () => {
   it("passes the prompt on stdin, streams events and returns usage", async () => {
@@ -33,7 +33,7 @@ describe("ClaudeRunner (fake claude binary)", () => {
     const rec = JSON.parse(readFileSync(join(dir, "record.json"), "utf8"));
     expect(rec.stdin).toBe("THE PROMPT");
     expect(rec.argv).not.toContain("THE PROMPT");
-    expect(rec.argv).toEqual(expect.arrayContaining(["-p", "--model", "haiku", "--max-turns", "7", "--allowedTools", "Read"]));
+    expect(rec.argv).toEqual(expect.arrayContaining(["-p", "--model", "haiku", "--max-turns", "7", "--allowedTools=Read", "--no-session-persistence"]));
   });
 
   it("reports a non-zero exit as a failure with stderr", async () => {
