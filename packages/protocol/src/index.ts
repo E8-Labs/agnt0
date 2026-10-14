@@ -572,6 +572,7 @@ export const routes = {
   stepEvents: (stepId: string) => `/v1/steps/${stepId}/events`,
   stepComplete: (stepId: string) => `/v1/steps/${stepId}/complete`,
   activity: (id: string) => `/v1/projects/${id}/activity`,
+  agents: (id: string) => `/v1/projects/${id}/agents`,
   guideMessages: "/v1/guide/messages",
   guideHistory: "/v1/guide/sessions/current",
   realtime: (id: string) => `/v1/rt/projects/${id}`,
@@ -646,6 +647,45 @@ export const ActivityEvent = z.object({
 });
 export const ActivityResponse = z.object({ steps: z.array(ActivityStep), events: z.array(ActivityEvent) });
 export type ActivityResponse = z.infer<typeof ActivityResponse>;
+
+/**
+ * What one agent has done on a project. Everything here is measured from steps the agent actually
+ * ran; anything we cannot measure yet is absent rather than zero, so the dashboard never shows a
+ * confident 0 for something that was simply never recorded.
+ */
+export const AgentStats = z.object({
+  role: Role,
+  steps: z.number().int(),
+  /** Tickets this agent worked, however many steps that took. */
+  tickets: z.number().int(),
+  /**
+   * Share of this agent's finished tickets that a reviewer approved without sending them back,
+   * 0-1. Absent until it has finished one, since a rate over no tickets is meaningless.
+   */
+  first_pass_rate: z.number().min(0).max(1).optional(),
+  /** Wall-clock seconds per step, averaged over the steps that ended. */
+  avg_step_seconds: z.number().optional(),
+  credits: z.number().int(),
+  tokens: z.number().int(),
+  /** What those tokens would cost at list API prices, in USD. An estimate, from placeholder prices. */
+  api_price_usd: z.number().optional(),
+  /** Share of the plan's weekly allowance this agent used, 0-1. */
+  plan_share: z.number().min(0).max(1).optional(),
+  /** Which models it ran on, most-used first. */
+  model_mix: z.array(z.object({ model: z.string(), steps: z.number().int() })),
+  last_active_at: z.string().nullable(),
+});
+export type AgentStats = z.infer<typeof AgentStats>;
+
+export const AgentsResponse = z.object({
+  agents: z.array(AgentStats),
+  /**
+   * Things the page would show but cannot measure yet, each with the reason, so the UI can say so
+   * instead of rendering a misleading zero. e.g. `tokens_saved` until compression ships.
+   */
+  unavailable: z.array(z.object({ metric: z.string(), reason: z.string() })).default([]),
+});
+export type AgentsResponse = z.infer<typeof AgentsResponse>;
 
 /** GET /v1/guide/sessions/current */
 export const GuideSession = z.object({
