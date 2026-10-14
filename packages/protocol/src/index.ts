@@ -265,10 +265,42 @@ export const Heartbeat = z.object({
 /* Projects and tickets                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The project's backend decision, made once and then honoured by every step.
+ *
+ * Without this, each step re-derives the stack from the brief and they can disagree — one ticket
+ * writing Prisma while the next writes Drizzle. Every field is optional because this has to describe
+ * any backend a user brings (Neon, Supabase, AWS, Rails, …), not a fixed menu; what matters is that
+ * the commands are stated once so no role has to guess them.
+ */
+export const ProjectStack = z.object({
+  /** One line for the dashboard, e.g. "Postgres on Neon with Drizzle". */
+  summary: z.string().max(400).optional(),
+  db: z.string().max(60).optional(),
+  /** Who hosts the database: neon, supabase, rds, local… */
+  provider: z.string().max(60).optional(),
+  orm: z.string().max(60).optional(),
+  auth: z.string().max(60).optional(),
+  storage: z.string().max(60).optional(),
+  hosting: z.string().max(60).optional(),
+  /** Exactly how this project runs migrations, so no step invents its own command. */
+  migrate_command: z.string().max(200).optional(),
+  test_command: z.string().max(200).optional(),
+  /**
+   * `disposable` means the database the agents touch can be recreated and is safe to migrate
+   * against; `shared` means it holds data someone would miss. Steps are told which, because a
+   * migration is the most destructive thing an agent can do to a project.
+   */
+  dev_database: z.enum(["disposable", "shared"]).optional(),
+});
+export type ProjectStack = z.infer<typeof ProjectStack>;
+
 export const ProjectSettings = z.object({
   default_runner: Runner.default("claude"),
   runner_by_role: z.record(Role, Runner).default({}),
   approval_policy: z.enum(["ask_risky", "ask_all", "auto"]).default("ask_risky"),
+  /** Absent until the Architect (or the user) has decided. */
+  stack: ProjectStack.optional(),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -322,7 +354,13 @@ export const PlannedTicket = z.object({
   title: z.string().min(3).max(140),
   description: z.string().max(4000),
   acceptance_criteria: z.array(z.string()).min(1).max(12),
-  role: z.enum(["frontend_developer", "backend_developer", "test_engineer", "docs_writer"]),
+  /**
+   * Roles the planner may schedule. `architect` is here so the backend decision can be a ticket of
+   * its own, made once before the work that depends on it; the others the planner never assigns —
+   * a review is created by the engine for every ticket, and the release ticket is added by the
+   * engine once the rest are done.
+   */
+  role: z.enum(["architect", "frontend_developer", "backend_developer", "test_engineer", "docs_writer"]),
   priority: z.number().int().min(1).max(5),
   depends_on: z.array(z.string()).default([]),
   parallel_ok: z.boolean().default(true),
@@ -634,6 +672,7 @@ export const ProjectPatch = z.object({
       default_runner: Runner.optional(),
       runner_by_role: z.record(Role, Runner).optional(),
       approval_policy: z.enum(["ask_risky", "ask_all", "auto"]).optional(),
+      stack: ProjectStack.optional(),
     })
     .optional(),
 });
