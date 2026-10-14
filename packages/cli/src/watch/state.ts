@@ -98,5 +98,8 @@ export function reduceWatch(state: WatchState, ev: RealtimeEvent): WatchState {
       return { ...state, cliState: ev.state };
     case "onboarding.updated":
       return state;
+    default:
+      // Newer event types (notifications, checkpoints, preview, QA, audit) are shown in the feed generically.
+      return { ...state, feed: pushFeed(state.feed, { at: new Date().toISOString(), kind: "event", text: ev.type.replace(".", " ") }) };
   }
 }

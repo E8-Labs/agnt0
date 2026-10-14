@@ -358,7 +358,7 @@ export const Step = z.object({
   /** Server-authored instructions. Held in CLI memory only; never written to disk. */
   prompt: z.string(),
   /** If set the runner must finish by printing one JSON object matching this schema name. */
-  output_schema: z.enum(["plan", "review"]).nullable(),
+  output_schema: z.enum(["plan", "review", "audit"]).nullable(),
   compression: Compression,
   allowed_tools: z.array(z.string()),
   scope: z.array(z.string()),
@@ -476,6 +476,15 @@ export const RealtimeEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("limit.reached"), limit: LimitReached }),
   z.object({ type: z.literal("cli.heartbeat"), state: z.enum(["idle", "running", "paused"]), at: z.string() }),
   z.object({ type: z.literal("onboarding.updated"), onboarding: OnboardingState }),
+  // M1/M2 additions
+  z.object({ type: z.literal("notification.created"), notification: z.lazy(() => Notification) }),
+  z.object({ type: z.literal("checkpoint.created"), checkpoint: z.lazy(() => Checkpoint) }),
+  z.object({ type: z.literal("checkpoint.restore_requested"), checkpoint: z.lazy(() => Checkpoint), requested_at: z.string() }),
+  z.object({ type: z.literal("preview.status"), preview: z.lazy(() => PreviewStatus) }),
+  z.object({ type: z.literal("qa.finding"), qa_run_id: z.string(), finding: z.lazy(() => QaFinding) }),
+  z.object({ type: z.literal("qa.completed"), qa_run: z.lazy(() => QaRun) }),
+  z.object({ type: z.literal("audit.progress"), audit_id: z.string(), stage: z.string(), at: z.string() }),
+  z.object({ type: z.literal("audit.completed"), audit: z.lazy(() => AuditRun) }),
 ]);
 export type RealtimeEvent = z.infer<typeof RealtimeEvent>;
 
@@ -624,3 +633,200 @@ export type RtTicketResponse = z.infer<typeof RtTicketResponse>;
 // (approve → ready, reject → blocked). Responds with Ticket; 409 when the ticket is not awaiting a decision.
 export const TicketDecisionRequest = z.object({ decision: z.enum(["approve", "reject"]) });
 export type TicketDecisionRequest = z.infer<typeof TicketDecisionRequest>;
+
+
+/* ------------------------------------------------------------------ */
+/* M1/M2 contracts — checkpoints, notifications, env, preview, QA, audit */
+/* ------------------------------------------------------------------ */
+
+// ---- Checkpoints. The CLI makes the git ref; the server keeps the record. Restore is executed by the CLI.
+export const Checkpoint = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  name: z.string(),
+  git_sha: z.string(),
+  git_ref: z.string(),
+  created_by: z.enum(["agent", "user"]),
+  step_id: z.string().nullable(),
+  created_at: z.string(),
+});
+export type Checkpoint = z.infer<typeof Checkpoint>;
+export const CreateCheckpointRequest = z.object({
+  name: z.string().min(1).max(120),
+  git_sha: z.string().regex(/^[0-9a-f]{7,64}$/),
+  git_ref: z.string().max(200),
+  created_by: z.enum(["agent", "user"]),
+  step_id: z.string().nullable().optional(),
+});
+export const CheckpointList = z.object({ checkpoints: z.array(Checkpoint) });
+/** POST /v1/checkpoints/{id}/restore — records the request and pushes checkpoint.restore_requested to the CLI. */
+export const RestoreResponse = z.object({ checkpoint: Checkpoint, requested_at: z.string(), cli_command: z.string() });
+
+// ---- Notifications
+export const NotificationType = z.enum(["approval", "limit", "step_failed", "ticket_blocked", "project_done", "audit_done", "qa_findings", "plan_ready"]);
+export const Notification = z.object({
+  id: z.string(),
+  type: NotificationType,
+  title: z.string(),
+  body: z.string(),
+  project_id: z.string().nullable(),
+  ticket_id: z.string().nullable(),
+  read_at: z.string().nullable(),
+  created_at: z.string(),
+});
+export type Notification = z.infer<typeof Notification>;
+export const NotificationList = z.object({ notifications: z.array(Notification), unread: z.number().int() });
+
+// ---- Env and secrets. Values only ever leave the server in EnvPullResponse (CLI token, logged).
+export const EnvName = z.enum(["dev", "preview", "prod"]);
+export type EnvName = z.infer<typeof EnvName>;
+export const EnvKey = z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/);
+export const EnvVarMeta = z.object({
+  key: z.string(),
+  environment: EnvName,
+  updated_at: z.string(),
+  last_accessed_at: z.string().nullable(),
+  preview: z.string().describe("Masked, e.g. sk_••••3f9a"),
+});
+export const EnvKeysResponse = z.object({ vars: z.array(EnvVarMeta) });
+/** PUT /v1/projects/{id}/env (web). value null deletes the key. */
+export const EnvPutRequest = z.object({
+  environment: EnvName,
+  vars: z.array(z.object({ key: EnvKey, value: z.string().max(16384).nullable() })).min(1).max(200),
+});
+/** GET /v1/projects/{id}/env?environment=dev (CLI token only). */
+export const EnvPullResponse = z.object({ environment: EnvName, vars: z.record(z.string()) });
+
+// ---- Preview (the CLI serves it locally; the server only learns its status)
+export const PreviewStatus = z.object({
+  project_id: z.string(),
+  state: z.enum(["starting", "running", "stopped", "error"]),
+  local_url: z.string().nullable(),
+  framework: z.string().nullable(),
+  devices: z.array(z.enum(["mobile", "tablet", "desktop"])),
+  message: z.string().nullable(),
+  at: z.string(),
+});
+export type PreviewStatus = z.infer<typeof PreviewStatus>;
+export const PreviewStatusRequest = PreviewStatus.omit({ project_id: true, at: true });
+
+// ---- Blobs (local disk driver in dev, R2 later). PUT/GET with a short-lived signed URL from the API.
+export const SignedUpload = z.object({ key: z.string(), put_url: z.string(), get_url: z.string(), expires_in_s: z.number().int() });
+
+// ---- QA
+export const QaDevice = z.enum(["mobile", "tablet", "desktop"]);
+export const QaFinding = z.object({
+  id: z.string(),
+  severity: z.enum(["low", "medium", "high"]),
+  device: QaDevice,
+  title: z.string().max(200),
+  url: z.string().max(2000),
+  repro_steps: z.array(z.string().max(500)).max(20),
+  screenshot_url: z.string().nullable(),
+  ticket_id: z.string().nullable(),
+});
+export type QaFinding = z.infer<typeof QaFinding>;
+export const QaRun = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  build_sha: z.string().nullable(),
+  devices: z.array(QaDevice),
+  status: z.enum(["running", "passed", "failed", "error"]),
+  findings_count: z.number().int(),
+  screenshots: z.array(z.object({ device: QaDevice, url: z.string(), page: z.string() })),
+  created_at: z.string(),
+  completed_at: z.string().nullable(),
+});
+export type QaRun = z.infer<typeof QaRun>;
+/** POST /v1/projects/{id}/qa-runs → QaRunCreated (charged as a QA step). */
+export const QaRunCreateRequest = z.object({
+  build_sha: z.string().nullable(),
+  devices: z.array(QaDevice).min(1),
+  base_url: z.string().max(500),
+  pages: z.array(z.string().max(500)).max(50),
+});
+export const QaRunCreated = z.object({ qa_run: QaRun, uploads: z.array(SignedUpload).max(200) });
+/** POST /v1/qa-runs/{id}/complete */
+export const QaRunCompleteRequest = z.object({
+  status: z.enum(["passed", "failed", "error"]),
+  screenshots: z.array(z.object({ device: QaDevice, key: z.string(), page: z.string() })).max(200),
+  findings: z
+    .array(z.object({
+      severity: z.enum(["low", "medium", "high"]),
+      device: QaDevice,
+      title: z.string().max(200),
+      url: z.string().max(2000),
+      repro_steps: z.array(z.string().max(500)).max(20),
+      screenshot_key: z.string().nullable(),
+    }))
+    .max(100),
+});
+export const QaRunList = z.object({ qa_runs: z.array(QaRun) });
+export const QaRunDetail = z.object({ qa_run: QaRun, findings: z.array(QaFinding) });
+
+// ---- Code Auditor. Runs as orchestrator steps (kind "audit", role code_auditor, output_schema "audit").
+export const AuditFindingKind = z.enum(["dead_code", "unwired_call", "orphan_handler", "duplicate", "contradiction", "parallel_run", "broken_build", "failing_test"]);
+export const AuditOutput = z.object({
+  summary: z.string().max(4000),
+  score: z.object({ overall: z.number().min(0).max(100), areas: z.record(z.number().min(0).max(100)) }),
+  findings: z
+    .array(z.object({
+      kind: AuditFindingKind,
+      severity: z.enum(["low", "medium", "high"]),
+      title: z.string().max(200),
+      file: z.string().max(500).nullable(),
+      line: z.number().int().nullable(),
+      evidence: z.string().max(4000),
+      confirmed_by_run: z.boolean(),
+    }))
+    .max(200),
+});
+export type AuditOutput = z.infer<typeof AuditOutput>;
+export const AuditFinding = AuditOutput.shape.findings.element.extend({
+  id: z.string(),
+  status: z.enum(["open", "ticketed", "dismissed"]),
+  ticket_id: z.string().nullable(),
+});
+export type AuditFinding = z.infer<typeof AuditFinding>;
+export const AuditRun = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  trigger: z.enum(["link", "import", "manual", "pre_ship"]),
+  mode: z.enum(["full", "static"]),
+  status: z.enum(["queued", "running", "completed", "failed", "skipped"]),
+  score: z.number().nullable(),
+  areas: z.record(z.number()).nullable(),
+  summary: z.string().nullable(),
+  estimate_credits: z.number().int(),
+  credits_used: z.number().int(),
+  commit_sha: z.string().nullable(),
+  created_at: z.string(),
+  completed_at: z.string().nullable(),
+});
+export type AuditRun = z.infer<typeof AuditRun>;
+/** POST /v1/projects/{id}/audits — queues an audit; the next steps/next leases its step. */
+export const AuditStartRequest = z.object({ mode: z.enum(["full", "static"]).default("full"), trigger: z.enum(["link", "import", "manual", "pre_ship"]).default("manual") });
+export const AuditList = z.object({ audits: z.array(AuditRun) });
+export const AuditDetail = z.object({ audit: AuditRun, findings: z.array(AuditFinding) });
+export const AuditFindingTicketRequest = z.object({ finding_ids: z.array(z.string()).min(1).max(50) });
+export const AuditFindingTicketResponse = z.object({ tickets: z.array(Ticket) });
+export const AuditFindingDismissRequest = z.object({ finding_ids: z.array(z.string()).min(1).max(50) });
+
+export const m2routes = {
+  checkpoints: (projectId: string) => `/v1/projects/${projectId}/checkpoints`,
+  checkpointRestore: (checkpointId: string) => `/v1/checkpoints/${checkpointId}/restore`,
+  notifications: "/v1/notifications",
+  notificationRead: (id: string) => `/v1/notifications/${id}/read`,
+  notificationsReadAll: "/v1/notifications/read-all",
+  envKeys: (projectId: string) => `/v1/projects/${projectId}/env/keys`,
+  env: (projectId: string) => `/v1/projects/${projectId}/env`,
+  preview: (projectId: string) => `/v1/projects/${projectId}/preview`,
+  blob: (key: string) => `/v1/blobs/${key}`,
+  qaRuns: (projectId: string) => `/v1/projects/${projectId}/qa-runs`,
+  qaRun: (runId: string) => `/v1/qa-runs/${runId}`,
+  qaRunComplete: (runId: string) => `/v1/qa-runs/${runId}/complete`,
+  audits: (projectId: string) => `/v1/projects/${projectId}/audits`,
+  audit: (auditId: string) => `/v1/audits/${auditId}`,
+  auditFindingsTicket: (auditId: string) => `/v1/audits/${auditId}/findings/ticket`,
+  auditFindingsDismiss: (auditId: string) => `/v1/audits/${auditId}/findings/dismiss`,
+} as const;
