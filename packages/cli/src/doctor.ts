@@ -151,10 +151,11 @@ export function summarize(checks: Check[]): DoctorResult {
   const fixes: DoctorResult["fixes"] = {};
   for (const c of checks) if (!c.ok) fixes[c.id] = FIXES[c.id];
   const notes: string[] = [];
-  // Codex runs, but its per-command approvals are not enforced yet — the sandbox is the guard. A
-  // user with only Codex should hear that rather than just "ready to build".
+  // Codex confines a step with its sandbox and refuses anything that asks to escalate out of it,
+  // because `codex exec` has nobody to ask. Worth saying, since it means a risky command is denied
+  // outright rather than put to the user.
   if (codexReady && !claudeReady) {
-    notes.push("Codex support is still experimental: steps are confined by Codex's sandbox, but per-command approvals aren't enforced yet. Install Claude Code for the fully supported path.");
+    notes.push("Codex steps are confined by Codex's own sandbox. A command that needs more than that is refused rather than queued for your approval, because a headless Codex run can't prompt.");
   }
   return { report: { cli_version: CLI_VERSION, os: describeOs(), checks }, fixes, ready, optional, ...(notes.length ? { notes } : {}) };
 }

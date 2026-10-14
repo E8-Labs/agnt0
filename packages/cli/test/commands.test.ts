@@ -143,9 +143,9 @@ describe("command smoke tests (API mocked)", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  // A Codex-only user is ready to build, but Codex's per-command approvals are not enforced yet, so
+  // A Codex-only user is ready to build, but a risky command is denied rather than put to them, so
   // "✓ Ready to build." on its own would overstate what they are getting.
-  it("doctor warns a Codex-only user that Codex is still experimental", () => {
+  it("doctor tells a Codex-only user how Codex confines a step", () => {
     const ok = [
       nodeCheck("22.1.0"),
       { id: "git", ok: true, detail: "" },
@@ -154,8 +154,8 @@ describe("command smoke tests (API mocked)", () => {
     ] as const;
     const codexOnly = summarize([...ok, { id: "claude", ok: false, detail: "" }, { id: "claude_login", ok: false, detail: "" }, { id: "codex", ok: true, detail: "0.162.1" }, { id: "codex_login", ok: true, detail: "logged in" }]);
     expect(codexOnly.ready).toBe(true);
-    expect(codexOnly.notes?.join(" ")).toMatch(/experimental/i);
-    expect(renderDoctor(codexOnly)).toMatch(/approvals aren't enforced/);
+    expect(codexOnly.notes?.join(" ")).toMatch(/sandbox/i);
+    expect(renderDoctor(codexOnly)).toMatch(/refused rather than queued/);
 
     // With Claude present there is nothing to warn about.
     const both = summarize([...ok, { id: "claude", ok: true, detail: "2.1" }, { id: "claude_login", ok: true, detail: "logged in" }, { id: "codex", ok: true, detail: "0.162.1" }, { id: "codex_login", ok: true, detail: "logged in" }]);

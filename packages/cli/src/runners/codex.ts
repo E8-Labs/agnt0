@@ -92,20 +92,24 @@ export function codexArgs(step: Pick<Step, "kind">, opts: CodexArgsOptions = {})
 }
 
 /**
- * EXPERIMENTAL Codex runner: `codex exec --json` with the prompt on stdin, using the user's Codex
- * login.
+ * Drives the user's own Codex headlessly (`codex exec --json`) with the prompt on stdin.
  *
- * Still experimental for one reason: per-command approvals are not enforced. `buildCodexPolicy`
- * generates the right execpolicy and its rules are verified against `codex execpolicy check`, but
- * Codex discovers `.rules` files from conventional paths rather than a flag, and which path that is
- * could not be confirmed without a live turn (`codex sandbox` and `codex doctor` do not consult the
- * execpolicy). Until a real run pins it down, the **sandbox is the only guard**: read-only for steps
- * that only look, workspace-write — which also blocks network — for the rest. That is the same
- * guarantee as before; it is just no weaker than it looks.
+ * **How a step is confined.** The sandbox does all of it: `read-only` for steps that only look,
+ * `workspace-write` — which also blocks network — for steps that change code. There is no
+ * per-command approval layer, and that is Codex's design rather than something missing here:
+ * `codex exec` pins its approval policy to `Never`, because a headless run has nobody to ask. A
+ * command that asks to escalate out of the sandbox is refused outright, logged by Codex as
+ * "approval policy is Never; reject command", and the turn carries on. So a step's
+ * `requires_approval` categories end up denied rather than prompted — the same outcome as the
+ * Claude runner, which maps them to `--disallowedTools`.
+ *
+ * Codex's execpolicy (`prefix_rule` in Starlark `.rules` files) is not a way around this: it records
+ * approvals a user has already granted interactively, and `codex exec` never reads one. Verified by
+ * tracing every file open of a real turn, including with `approval_policy.granular.rules = true`.
  */
 export class CodexRunner implements RunnerAdapter {
   readonly id = "codex" as const;
-  readonly label = "Codex (experimental)";
+  readonly label = "Codex";
   constructor(private readonly bin = process.env.AGNT0_CODEX_BIN ?? "codex") {}
 
   async isAvailable(): Promise<boolean> {
