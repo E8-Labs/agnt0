@@ -109,6 +109,18 @@ export class ClaudeStreamParser {
       case "system": {
         if (typeof msg.model === "string") this.model = msg.model;
         if (typeof msg.session_id === "string") this.sessionId = msg.session_id;
+        // Claude Code says outright when it refuses a tool call, and says why in words meant for a
+        // person ("rm in '…' needs approval. The path is inside the working directories…"). Prefer
+        // that to anything we could infer: it is structured, and it explains the actual reason.
+        if (msg.subtype === "permission_denied") {
+          const id = typeof msg.tool_use_id === "string" ? msg.tool_use_id : null;
+          const reason = typeof msg.message === "string" ? msg.message.trim() : "";
+          const ev = this.denial(id ?? `anon-denial-${this.deniedIds.size}`, at, {
+            ...(reason ? { reason } : {}),
+            ...(typeof msg.tool_name === "string" ? { toolName: msg.tool_name } : {}),
+          });
+          if (ev) events.push(ev);
+        }
         break;
       }
       case "assistant": {
@@ -166,19 +178,31 @@ export class ClaudeStreamParser {
     return events;
   }
 
-  /** One `log` event per denied call, tagged with its approval category when it has one. */
-  private denial(id: string, at: string): StepEvent | null {
+  /**
+   * One `log` event per denied call, tagged with its approval category when it has one.
+   *
+   * `reason` is Claude Code's own explanation, when it gave one. It beats our wording because it
+   * names the actual rule that stopped the call, so prefer it and keep the category as the tag the
+   * server and the step summary group by.
+   */
+  private denial(id: string, at: string, from: { reason?: string; toolName?: string } = {}): StepEvent | null {
     if (this.deniedIds.has(id)) return null;
     this.deniedIds.add(id);
-    const call = this.toolCalls.get(id) ?? { name: "unknown", input: undefined };
+    const call = this.toolCalls.get(id) ?? { name: from.toolName ?? "unknown", input: undefined };
     const category = categorizeDenial(call.name, call.input);
     const what = toolUseToEvent(call.name, call.input, at).summary;
     if (category && !this.approvalsNeeded.includes(category)) this.approvalsNeeded.push(category);
+    const ours = category ? `needs approval: ${category} (${what})` : `blocked: ${what} is not allowed in this step`;
     return {
       type: "log",
-      summary: short(category ? `needs approval: ${category} (${what})` : `blocked: ${what} is not allowed in this step`, 2000),
+      summary: short(from.reason ? (category ? `needs approval: ${category} — ${from.reason}` : from.reason) : ours, 2000),
       at,
-      data: { permission_denied: true, tool: call.name, ...(category ? { approval_needed: category } : {}) },
+      data: {
+        permission_denied: true,
+        tool: call.name,
+        ...(category ? { approval_needed: category } : {}),
+        ...(from.reason ? { reason: short(from.reason, 500) } : {}),
+      },
     };
   }
 

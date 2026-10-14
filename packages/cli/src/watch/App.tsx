@@ -1,7 +1,7 @@
 import { ROLE_LABELS, type RealtimeEvent, type UsageSnapshot } from "@agnt0/protocol";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useReducer, useState } from "react";
-import { initialWatchState, reduceWatch, type AgentTile, type WatchState } from "./state.js";
+import { compactTokens, initialWatchState, reduceWatch, type AgentTile, type WatchState } from "./state.js";
 
 type Action = { kind: "event"; event: RealtimeEvent } | { kind: "connection"; value: WatchState["connection"] } | { kind: "usage"; usage: UsageSnapshot };
 
@@ -42,6 +42,7 @@ function Tile({ t, now, width }: { t: AgentTile; now: number; width: number }) {
       <Text wrap="truncate">{t.file ? `✎ ${t.file}` : t.lastEvent ?? "starting…"}</Text>
       <Text dimColor wrap="truncate">
         {elapsed(t.startedAt, t.endedAt, now)} · {t.events} events{t.credits !== null ? ` · ${t.credits} cr` : ""}
+        {t.tokens !== null ? ` · ${compactTokens(t.tokens)} tok` : ""}
       </Text>
     </Box>
   );

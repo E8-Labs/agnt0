@@ -478,7 +478,15 @@ export type GuideMessage = z.infer<typeof GuideMessage>;
 export const RealtimeEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("step.started"), step_id: z.string(), ticket_id: z.string().nullable(), role: Role, at: z.string() }),
   z.object({ type: z.literal("step.event"), step_id: z.string(), event: StepEvent }),
-  z.object({ type: z.literal("step.completed"), step_id: z.string(), outcome: z.string(), credits_charged: z.number(), at: z.string() }),
+  z.object({
+    type: z.literal("step.completed"),
+    step_id: z.string(),
+    outcome: z.string(),
+    credits_charged: z.number(),
+    /** Tokens the step reported (input + output + cache reads), for the live agent tiles. */
+    tokens: z.number().optional(),
+    at: z.string(),
+  }),
   z.object({ type: z.literal("ticket.updated"), ticket: Ticket }),
   z.object({ type: z.literal("usage.updated"), usage: UsageSnapshot }),
   z.object({ type: z.literal("limit.reached"), limit: LimitReached }),

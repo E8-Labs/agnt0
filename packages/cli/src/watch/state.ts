@@ -10,7 +10,17 @@ export interface AgentTile {
   events: number;
   status: "running" | "succeeded" | "failed";
   credits: number | null;
+  /** Tokens the step reported, once it has finished. */
+  tokens: number | null;
   endedAt: string | null;
+}
+
+/** `34200` → `34.2k`: a tile has room for the magnitude, not the digits. */
+export function compactTokens(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "0";
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
 export interface FeedItem {
@@ -70,6 +80,7 @@ export function reduceWatch(state: WatchState, ev: RealtimeEvent): WatchState {
         events: 0,
         status: "running",
         credits: null,
+        tokens: null,
         endedAt: null,
       };
       const tiles = runningFirst([tile, ...state.tiles.filter((t) => t.stepId !== ev.step_id)]);
@@ -85,8 +96,9 @@ export function reduceWatch(state: WatchState, ev: RealtimeEvent): WatchState {
     }
     case "step.completed": {
       const ok = ev.outcome === "succeeded";
-      const tiles = runningFirst(state.tiles.map((t) => (t.stepId === ev.step_id ? { ...t, status: ok ? ("succeeded" as const) : ("failed" as const), credits: ev.credits_charged, endedAt: ev.at } : t)));
-      return { ...state, tiles, feed: pushFeed(state.feed, { at: ev.at, kind: ok ? "done" : "fail", text: `step ${ev.outcome} · ${ev.credits_charged} credits` }) };
+      const tiles = runningFirst(state.tiles.map((t) => (t.stepId === ev.step_id ? { ...t, status: ok ? ("succeeded" as const) : ("failed" as const), credits: ev.credits_charged, tokens: ev.tokens ?? null, endedAt: ev.at } : t)));
+      const spent = `${ev.credits_charged} credits${ev.tokens ? ` · ${compactTokens(ev.tokens)} tokens` : ""}`;
+      return { ...state, tiles, feed: pushFeed(state.feed, { at: ev.at, kind: ok ? "done" : "fail", text: `step ${ev.outcome} · ${spent}` }) };
     }
     case "ticket.updated": {
       const tickets = { ...state.tickets, [ev.ticket.id]: ev.ticket };

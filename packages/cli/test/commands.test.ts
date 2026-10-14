@@ -9,7 +9,7 @@ import { creditsBuyCommand, creditsUseCommand, openCommand, upgradeCommand } fro
 import { nodeCheck, summarize } from "../src/doctor.js";
 import { buildProgram } from "../src/program.js";
 import { writeProjectFile } from "../src/project.js";
-import { initialWatchState, reduceWatch } from "../src/watch/state.js";
+import { compactTokens, initialWatchState, reduceWatch } from "../src/watch/state.js";
 import { realtimeUrl } from "../src/watch/source.js";
 import { captureLog, makeCtx, me, startMockApi, tempDir, usageSnapshot, validTokens, type MockApi } from "./helpers.js";
 
@@ -215,6 +215,30 @@ describe("watch state", () => {
     });
     expect(s.approvals.map((t) => t.title)).toEqual(["Delete old table"]);
     expect(s.feed[0]!.text).toContain("succeeded");
+  });
+
+  it("shows tokens on a tile once the step reports them", () => {
+    let s = reduceWatch(initialWatchState, { type: "step.started", step_id: "stp_1", ticket_id: "tkt_1", role: "frontend_developer", at: "2026-10-13T12:00:00Z" });
+    expect(s.tiles[0]!.tokens).toBeNull(); // nothing to show while it runs
+    s = reduceWatch(s, { type: "step.completed", step_id: "stp_1", outcome: "succeeded", credits_charged: 4, tokens: 17_997, at: "2026-10-13T12:01:00Z" });
+    expect(s.tiles[0]).toMatchObject({ status: "succeeded", credits: 4, tokens: 17_997 });
+    expect(s.feed[0]!.text).toContain("18k tokens");
+
+    // An older server does not send tokens; the tile just omits them.
+    let old = reduceWatch(initialWatchState, { type: "step.started", step_id: "stp_2", ticket_id: null, role: "planner", at: "2026-10-13T12:00:00Z" });
+    old = reduceWatch(old, { type: "step.completed", step_id: "stp_2", outcome: "succeeded", credits_charged: 2, at: "2026-10-13T12:01:00Z" });
+    expect(old.tiles[0]!.tokens).toBeNull();
+    expect(old.feed[0]!.text).not.toContain("tokens");
+  });
+
+  it("writes token counts a tile has room for", () => {
+    expect(compactTokens(0)).toBe("0");
+    expect(compactTokens(999)).toBe("999");
+    expect(compactTokens(3_517)).toBe("3.5k");
+    expect(compactTokens(17_997)).toBe("18k");
+    expect(compactTokens(1_250_000)).toBe("1.3M");
+    expect(compactTokens(-1)).toBe("0");
+    expect(compactTokens(Number.NaN)).toBe("0");
   });
 
   it("builds the realtime URL with the token", () => {

@@ -70,6 +70,46 @@ describe("Claude stream-json parsing", () => {
   });
 });
 
+describe("permission denials", () => {
+  // Exactly what claude 2.1.299 emitted when it refused `rm -f` inside the working directory.
+  const toolUse = JSON.stringify({
+    type: "assistant",
+    message: { id: "m1", model: "claude-sonnet-5-5", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "rm -f /tmp/permtest/a.txt" } }] },
+  });
+  const denied = JSON.stringify({
+    type: "system",
+    subtype: "permission_denied",
+    tool_name: "Bash",
+    tool_use_id: "toolu_1",
+    message: "rm in '/tmp/permtest/a.txt' needs approval. The path is inside the working directories for this session ('/tmp/permtest'), and Claude Code asks before a shell command creates, changes or removes files there.",
+  });
+
+  it("reports Claude Code's own reason, tagged with the approval category", () => {
+    const { p, events } = parseAll([toolUse, denied]);
+    const log = events.find((e) => e.data?.permission_denied === true)!;
+    expect(log).toBeDefined();
+    expect(log.data?.approval_needed).toBe("delete");
+    expect(log.data?.reason).toContain("needs approval");
+    expect(log.data?.reason).toContain("working directories");
+    // The category stays in the summary so the step summary can still group by it.
+    expect(log.summary).toContain("needs approval: delete");
+    expect(log.summary).toContain("asks before a shell command");
+    expect(p.approvalsNeeded).toContain("delete");
+  });
+
+  it("reports each denied call once, however many times Claude mentions it", () => {
+    const { events } = parseAll([toolUse, denied, denied]);
+    expect(events.filter((e) => e.data?.permission_denied === true)).toHaveLength(1);
+  });
+
+  it("still names the tool when the denial arrives without a matching tool_use", () => {
+    const { events } = parseAll([denied]);
+    const log = events.find((e) => e.data?.permission_denied === true)!;
+    expect(log.data?.tool).toBe("Bash");
+    expect(log.summary).toContain("needs approval");
+  });
+});
+
 describe("JSON output extraction", () => {
   it("prefers the last ```json block", () => {
     const text = 'first\n```json\n{"a":1}\n```\nthen\n```json\n{"a":2}\n```\n';

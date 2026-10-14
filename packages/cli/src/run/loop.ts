@@ -351,7 +351,9 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
         const category = typeof e.data?.approval_needed === "string" ? e.data.approval_needed : null;
         if (category) {
           if (!approvals.includes(category)) approvals.push(category);
-          log(`  ${pc.yellow("needs approval:")} ${category} ${pc.dim(truncate(e.summary.replace(/^needs approval: \S+ /, ""), 100))}`);
+          // Claude Code's own explanation when it gave one, otherwise the command we inferred from.
+          const why = typeof e.data?.reason === "string" ? e.data.reason : e.summary.replace(/^needs approval: \S+ /, "");
+          log(`  ${pc.yellow("needs approval:")} ${category} ${pc.dim(truncate(why, 140))}`);
         } else if (e.data?.permission_denied === true) {
           log(`  ${pc.yellow(truncate(e.summary, 120))}`);
         } else if (e.type !== "message" && Date.now() - lastShown > 250) {
