@@ -214,4 +214,21 @@ describe("agnt0 run", () => {
     expect(exit).toEqual({ status: "paused", code: "limit_reached" });
     expect(out.text()).toContain("agnt0 credits use");
   });
+
+  it("prints a completion summary when every ticket is done", async () => {
+    // two ticket branches: one merged into main already, one still to merge
+    await execa("git", ["branch", "agnt0/tkt_1"], { cwd: dir });
+    await execa("git", ["checkout", "-q", "-b", "agnt0/tkt_2"], { cwd: dir });
+    await execa("git", ["-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-q", "--allow-empty", "-m", "work"], { cwd: dir });
+    await execa("git", ["checkout", "-q", "-"], { cwd: dir });
+    const ticket = (id: string) => ({ id, project_id: "prj_1", title: id, description: "", acceptance_criteria: ["x"], status: "done", role: "frontend_developer", priority: 1, depends_on: [], parallel_ok: true, lease_owner: null, lease_expires_at: null, created_at: "", updated_at: "" });
+    api.on("POST", routes.stepsNext("prj_1"), () => ({ body: { kind: "idle", reason: "all_done", message: "Every ticket is done." } }));
+    api.on("GET", routes.tickets("prj_1"), () => ({ body: { tickets: [ticket("tkt_1"), ticket("tkt_2")] } }));
+    const step = (id: string, credits: number) => ({ id, ticket_id: null, kind: "build", role: "frontend_developer", model: "sonnet", status: "succeeded", summary: null, credits_charged: credits, started_at: "", ended_at: null });
+    api.on("GET", routes.activity("prj_1"), () => ({ body: { steps: [step("s1", 5), step("s2", 7)], events: [] } }));
+    const out = captureLog();
+    const exit = await runLoop({ api: makeCtx(api.url).api, projectId: "prj_1", repoRoot: dir, webUrl: "w", runners: [new FakeRunner(async () => ({ ok: true, finalText: "", usage }))], log: out.log });
+    expect(exit).toMatchObject({ status: "idle", reason: "all_done" });
+    expect(out.lines.at(-1)).toBe("✓ All 2 tickets done · 12 credits used · 1 branch to merge: agnt0/tkt_2");
+  });
 });

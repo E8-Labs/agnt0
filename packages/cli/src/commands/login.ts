@@ -32,9 +32,12 @@ export async function loginCommand(ctx: Context, opts: LoginOptions = {}): Promi
       log("");
       log("Confirm this code in your browser:");
       for (const l of renderUserCode(s.user_code)) log(l);
+      // Plain copy for copy-paste and grep.
+      log(`Code: ${s.user_code}`);
       log("");
       const opened = opts.browser !== false && (await openBrowser(s.verification_uri_complete));
-      log(opened ? `Opened ${pc.underline(s.verification_uri_complete)}` : `Open ${pc.underline(s.verification_uri)} and enter the code.`);
+      log(`${opened ? "Opened" : "Open"} ${pc.underline(s.verification_uri_complete)}`);
+      if (!opened) log(pc.dim(`  (or go to ${s.verification_uri} and enter the code)`));
       log(pc.dim("Waiting for approval…"));
     },
   });

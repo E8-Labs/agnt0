@@ -595,3 +595,18 @@ export type GuideHistoryResponse = z.infer<typeof GuideHistoryResponse>;
 /** Realtime user channel (counterpart of routes.realtime): wss://<api>/v1/rt/me?token=... carries
  *  usage.updated, limit.reached, onboarding.updated and cli.heartbeat for the signed-in user. */
 export const realtimeMe = "/v1/rt/me";
+
+// added by api — PATCH /v1/projects/{id} (responds with Project). Omitted fields are left unchanged;
+// `settings` keys are merged into the current settings; `brief: null` clears the brief.
+export const ProjectPatch = z.object({
+  name: z.string().min(1).max(80).optional(),
+  brief: z.string().max(20000).nullable().optional(),
+  settings: z
+    .object({
+      default_runner: Runner.optional(),
+      runner_by_role: z.record(Role, Runner).optional(),
+      approval_policy: z.enum(["ask_risky", "ask_all", "auto"]).optional(),
+    })
+    .optional(),
+});
+export type ProjectPatch = z.infer<typeof ProjectPatch>;

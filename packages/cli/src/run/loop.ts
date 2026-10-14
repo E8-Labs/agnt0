@@ -21,6 +21,7 @@ import { CLI_VERSION } from "../version.js";
 import { createCheckpoint, finalizeWorktree, measureRoot, WorktreeManager, type DiffResult } from "../worktree.js";
 import { EventBatcher } from "./events.js";
 import { pauseMessage, usageWarnings } from "./limits.js";
+import { collectCompletionSummary, formatCompletionSummary } from "./summary.js";
 
 export type RunExit =
   | { status: "idle"; reason: string; message: string }
@@ -81,6 +82,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunExit> {
   };
 
   let steps = 0;
+  let creditsThisRun = 0;
   let offlineSince: number | null = null;
   try {
     for (;;) {
@@ -122,6 +124,13 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunExit> {
           await sleep(opts.idlePollMs ?? 15_000);
           continue;
         }
+        if (next.reason === "all_done") {
+          try {
+            log(formatCompletionSummary(await collectCompletionSummary(api, projectId, repoRoot, creditsThisRun)));
+          } catch (e) {
+            debug("completion summary failed", e);
+          }
+        }
         return { status: "idle", reason: next.reason, message: next.message };
       }
 
@@ -131,6 +140,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunExit> {
       const res = await executeStep(step, { ...opts, log, signal, available });
       steps++;
       if (res === "interrupted") return { status: "interrupted" };
+      creditsThisRun += res.credits_charged;
       for (const w of usageWarnings(res.usage)) log(w);
       if (res.next === "pause_limit") {
         setState("paused");

@@ -28,7 +28,7 @@ Requires Node.js 20+, git and [Claude Code](https://www.npmjs.com/package/@anthr
 npm i -g agnt0
 agnt0 login     # confirm the code in your browser
 agnt0 doctor    # Node, git, Claude Code login, free ports
-agnt0 init      # create a project in this folder (add --brief "…" to describe it)
+agnt0 init      # create a project here, or attach to the guide's: agnt0 init --project <id>
 agnt0 run       # start the build loop
 ```
 

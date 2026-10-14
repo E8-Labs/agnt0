@@ -5,6 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initCommand, linkCommand } from "../src/commands/init.js";
+import type { PickerIO } from "../src/picker.js";
 import { captureLog, makeCtx, makeRepo, startMockApi, tempDir, type MockApi } from "./helpers.js";
 
 let api: MockApi;
@@ -49,7 +50,7 @@ describe("agnt0 init", () => {
     const exclude = await readFile(join(target, ".git", "info", "exclude"), "utf8");
     expect(exclude.split("\n")).toContain(".agnt0/");
     expect((await execa("git", ["status", "--porcelain"], { cwd: target })).stdout).toBe("");
-    expect(out.text()).toContain("Project my-app (prj_1) linked");
+    expect(out.text()).toContain("Created project my-app (prj_1 · define)");
   });
 
   it("reads the brief from a file and refuses to relink without --force", async () => {
@@ -86,5 +87,83 @@ describe("agnt0 link", () => {
   it("refuses folders that aren't git repos", async () => {
     process.chdir(dir);
     await expect(linkCommand(makeCtx(api.url), undefined, {}, () => {})).rejects.toThrow(/isn't a git repository/);
+  });
+});
+
+function scriptedPicker(answers: string[]): PickerIO & { prompts: string[]; out: string[] } {
+  const prompts: string[] = [];
+  const out: string[] = [];
+  return { prompts, out, log: (l) => out.push(l), ask: async (q) => (prompts.push(q), answers.shift() ?? "") };
+}
+
+describe("attaching to an existing project", () => {
+  it("init --project verifies the project and links without creating one", async () => {
+    api.on("GET", routes.project("prj_guide"), () => ({ body: project({ id: "prj_guide", name: "guide-app", phase: "wireframe" }) }));
+    const out = captureLog();
+    const res = await initCommand(makeCtx(api.url), undefined, { dir, project: "prj_guide" }, out.log, null);
+    expect(res.attached).toBe(true);
+    expect(api.requests.map((r) => `${r.method} ${r.path}`)).toEqual([`GET ${routes.project("prj_guide")}`]);
+    expect(JSON.parse(await readFile(join(dir, ".agnt0", "project.json"), "utf8"))).toEqual({ project_id: "prj_guide", api_url: api.url, name: "guide-app" });
+    expect(await readFile(join(dir, ".git", "info", "exclude"), "utf8")).toContain(".agnt0/");
+    expect(out.text()).toContain("Attached to project guide-app (prj_guide · wireframe)");
+  });
+
+  it("init --project with an unknown id fails before touching the folder", async () => {
+    const target = join(dir, "nope");
+    await expect(initCommand(makeCtx(api.url), undefined, { dir: target, project: "prj_missing" }, () => {}, null)).rejects.toThrow(/no project prj_missing/);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("init --project refuses --brief", async () => {
+    await expect(initCommand(makeCtx(api.url), undefined, { dir, project: "prj_x", brief: "hi" }, () => {}, null)).rejects.toThrow(/only applies when creating/);
+  });
+
+  it("link --project links the current repo to an existing project", async () => {
+    await makeRepo(dir);
+    api.on("GET", routes.project("prj_guide"), () => ({ body: project({ id: "prj_guide", name: "guide-app" }) }));
+    process.chdir(dir);
+    const res = await linkCommand(makeCtx(api.url), undefined, { project: "prj_guide" }, () => {}, null);
+    expect(res.attached).toBe(true);
+    expect(api.requests.some((r) => r.method === "POST")).toBe(false);
+    expect(existsSync(join(dir, ".agnt0", "project.json"))).toBe(true);
+  });
+
+  it("the picker offers existing projects and attaches to the chosen one", async () => {
+    api.on("GET", routes.projects, () => ({ body: { projects: [project({ id: "prj_new", name: "newest" }), project({ id: "prj_old", name: "older" })] } }));
+    const picker = scriptedPicker(["2"]);
+    const res = await initCommand(makeCtx(api.url), undefined, { dir }, () => {}, picker);
+    expect(res.project.id).toBe("prj_old");
+    expect(picker.out.join("\n")).toContain("Create a new project");
+    expect(picker.prompts[0]).toContain("[1]");
+    expect(api.requests.some((r) => r.method === "POST")).toBe(false);
+  });
+
+  it("Enter picks the newest project, unless a name was given (then it defaults to new)", async () => {
+    api.on("GET", routes.projects, () => ({ body: { projects: [project({ id: "prj_new", name: "newest" })] } }));
+    api.on("POST", routes.projects, (r) => ({ status: 201, body: project({ id: "prj_created", name: r.body.name }) }));
+    const res1 = await initCommand(makeCtx(api.url), undefined, { dir: join(dir, "a") }, () => {}, scriptedPicker([""]));
+    expect(res1.project.id).toBe("prj_new");
+    const p2 = scriptedPicker([""]);
+    const res2 = await initCommand(makeCtx(api.url), "fresh", { dir: join(dir, "b") }, () => {}, p2);
+    expect(p2.prompts[0]).toContain("[n]");
+    expect(res2.project.id).toBe("prj_created");
+    expect(api.requests.find((r) => r.method === "POST")!.body).toMatchObject({ name: "fresh", mode: "new" });
+  });
+
+  it("choosing n creates a new project; no picker (non-TTY) skips the list entirely", async () => {
+    api.on("GET", routes.projects, () => ({ body: { projects: [project({ id: "prj_new" })] } }));
+    api.on("POST", routes.projects, () => ({ status: 201, body: project({ id: "prj_created" }) }));
+    expect((await initCommand(makeCtx(api.url), undefined, { dir: join(dir, "a") }, () => {}, scriptedPicker(["n"]))).project.id).toBe("prj_created");
+    api.requests.length = 0;
+    expect((await initCommand(makeCtx(api.url), undefined, { dir: join(dir, "b") }, () => {}, null)).project.id).toBe("prj_created");
+    expect(api.requests.map((r) => r.method)).toEqual(["POST"]);
+  });
+
+  it("an empty account skips the picker", async () => {
+    api.on("GET", routes.projects, () => ({ body: { projects: [] } }));
+    api.on("POST", routes.projects, () => ({ status: 201, body: project() }));
+    const picker = scriptedPicker([]);
+    await initCommand(makeCtx(api.url), undefined, { dir }, () => {}, picker);
+    expect(picker.prompts).toHaveLength(0);
   });
 });

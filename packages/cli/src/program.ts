@@ -68,17 +68,21 @@ export function buildProgram(makeContext: () => Context = () => createContext())
 
   program
     .command("init [name]")
-    .description("create a new Agent Zero project in this folder")
+    .description("set up this folder for Agent Zero: create a project, or attach to one (e.g. made by the web guide)")
+    .option("--project <id>", "attach to an existing project instead of creating one")
     .option("--brief <text>", "what you want to build")
     .option("--brief-file <path>", "read the brief from a file")
     .option("--dir <path>", "folder to initialize (default: current folder)")
     .option("--force", "replace an existing link")
+    .addHelpText("after", "\nIn an interactive terminal, if your account already has projects, agnt0 asks whether to use one or create a new one.")
     .action(wrap((ctx, name: string | undefined, o) => initCommand(ctx, name, o)));
 
   program
     .command("link [name]")
-    .description("link this existing git repo to a new Agent Zero project")
+    .description("link this existing git repo to a new or existing Agent Zero project")
+    .option("--project <id>", "link to an existing project instead of creating one")
     .option("--force", "replace an existing link")
+    .addHelpText("after", "\nIn an interactive terminal, if your account already has projects, agnt0 asks whether to use one or create a new one.")
     .action(wrap((ctx, name: string | undefined, o) => linkCommand(ctx, name, o)));
 
   program

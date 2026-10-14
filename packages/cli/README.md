@@ -41,9 +41,9 @@ npm i -g ./agnt0-<version>.tgz
 ## Quick start
 
 ```sh
-agnt0 login        # opens your browser; confirm the code shown in the terminal
+agnt0 login        # opens your browser; confirm the code (use --no-browser to just print the link)
 agnt0 doctor       # checks Node, git, Claude Code login, ports
-agnt0 init my-app --brief "A habit tracker with streaks"
+agnt0 init my-app --brief "A habit tracker with streaks"   # or: agnt0 init --project <id from the web guide>
 agnt0 run          # works through steps until there's nothing ready
 agnt0 watch        # in another terminal: live view of your agents
 ```
@@ -57,8 +57,8 @@ agnt0 watch        # in another terminal: live view of your agents
 | `agnt0 status [--json]` | Account, plan, session/week meters, linked project, API connection, runners | No |
 | `agnt0 usage [--json]` | Session and weekly meters with reset times, hosted-AI share, extra-credit wallet | No |
 | `agnt0 doctor [--json] [--no-upload]` | Checks Node ≥ 20, git, package manager, Claude Code / Codex install and login, ports 3000/5173 | No |
-| `agnt0 init [name] [--brief <text> \| --brief-file <path>] [--dir <path>]` | Creates a project, `git init` if needed, writes `.agnt0/project.json` | Yes |
-| `agnt0 link [name]` | Links the current git repo to a new project (sends the HEAD sha) | Yes |
+| `agnt0 init [name] [--project <id>] [--brief <text> \| --brief-file <path>] [--dir <path>]` | Creates a project, or attaches to an existing one with `--project`; `git init` if needed, writes `.agnt0/project.json` | Yes |
+| `agnt0 link [name] [--project <id>]` | Links the current git repo to a new project (sends the HEAD sha), or to an existing one with `--project` | Yes |
 | `agnt0 run [--watch] [--once]` | The build loop: lease a step, run it in `.agnt0/wt/<ticket>`, report back, repeat | Yes |
 | `agnt0 watch` | Full-screen view: agent tiles, approvals waiting, live events, usage strip (`q` quits) | Yes |
 | `agnt0 open` | Opens the project dashboard | Yes |
@@ -66,6 +66,19 @@ agnt0 watch        # in another terminal: live view of your agents
 | `agnt0 credits buy` / `agnt0 upgrade` | Open the credit packs / plans page | No |
 
 Global options: `--api <url>`, `--version`, `--help`.
+
+## Projects made by the web guide
+
+The guide on the web app creates your project for you. Attach this folder to it with:
+
+```sh
+agnt0 init --project prj_…     # new folder (runs git init)
+agnt0 link --project prj_…     # existing repo
+```
+
+Without `--project`, in an interactive terminal, `init` and `link` list the projects your account
+already has and ask whether to use one or create a new one (Enter picks the newest, or "new" when you
+passed a name). In scripts and CI (no TTY) they always create a new project.
 
 ## How `agnt0 run` works
 
@@ -78,7 +91,9 @@ Global options: `--api <url>`, `--version`, `--help`.
    Claude Code's own output.
 4. The work is committed on the ticket branch (`agnt0: <ticket> <role>`) and the outcome, diff stats
    and usage are reported.
-5. When idle it prints why and exits (`--watch` keeps polling). When a usage limit is reached it
+5. When idle it prints why and exits (`--watch` keeps polling). When every ticket is done it prints a
+   one-line summary: tickets done, credits used and the `agnt0/<ticket>` branches still to merge
+   (merging is the Release Manager's job, not done automatically yet). When a usage limit is reached it
    pauses, prints the reset time and how to keep going (`agnt0 credits use`, `agnt0 upgrade`), and
    exits 0. Ctrl-C reports the current step as interrupted.
 

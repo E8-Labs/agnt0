@@ -94,6 +94,9 @@ describe("device login", () => {
     expect(res.email).toBe("noah@example.com");
     expect(out.text()).toContain("Logged in as noah@example.com");
     expect(out.text()).toContain("A B C D - E F G H");
+    expect(out.lines).toContain("Code: ABCD-EFGH");
+    // without a browser the full link (with ?code=) is printed
+    expect(out.text()).toContain("Open http://web.test/cli/device?code=ABCD-EFGH");
     const saved = ctx.store.data.get(api.url)!;
     expect(saved.access_token).toBe("at_new");
     expect(saved.refresh_token).toBe("rt_new");
