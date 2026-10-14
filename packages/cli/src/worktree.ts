@@ -54,7 +54,20 @@ export class WorktreeManager {
     return (await headSha(this.repoRoot)) as string;
   }
 
-  async ensure(rel: string, branch: string | null): Promise<Worktree> {
+  /**
+   * Resolves the ref a new branch should start from. The server names it (the branch of the ticket
+   * this one depends on) so dependent work starts with its dependency's commits instead of an empty
+   * trunk. Falls back to HEAD when there is no base, when it is not a local branch yet, or when the
+   * name does not survive sanitising — branching from the trunk is always safe, just emptier.
+   */
+  private async resolveBase(base: string | null | undefined): Promise<string> {
+    if (!base) return "HEAD";
+    const ref = safeRefPart(base);
+    if (ref !== base) return "HEAD";
+    return (await gitOk(this.repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${ref}`])) ? ref : "HEAD";
+  }
+
+  async ensure(rel: string, branch: string | null, base: string | null = null): Promise<Worktree> {
     const path = this.resolvePath(rel);
     await ensureExcluded(this.repoRoot);
     const wantBranch = safeRefPart(branch ?? `agnt0/${basename(path)}`);
@@ -73,7 +86,7 @@ export class WorktreeManager {
     await git(this.repoRoot, ["worktree", "prune"]);
     const branchExists = await gitOk(this.repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${wantBranch}`]);
     if (branchExists) await git(this.repoRoot, ["worktree", "add", "-q", path, wantBranch]);
-    else await git(this.repoRoot, ["worktree", "add", "-q", "-b", wantBranch, path, "HEAD"]);
+    else await git(this.repoRoot, ["worktree", "add", "-q", "-b", wantBranch, path, await this.resolveBase(base)]);
     const baseSha = (await headSha(path)) as string;
     return { path, branch: wantBranch, baseSha, created: true };
   }

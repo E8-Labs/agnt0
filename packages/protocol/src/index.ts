@@ -365,6 +365,14 @@ export const Step = z.object({
   /** Relative to the repo root, e.g. .agnt0/wt/tkt_41. Null = run in the repo root (plan steps). */
   worktree: z.string().nullable(),
   branch: z.string().nullable(),
+  /**
+   * Local ref a new worktree branch is cut from, e.g. `agnt0/tkt_40` for a ticket that depends on
+   * tkt_40. Null, absent or unknown locally means branch from HEAD. Only used when the branch is
+   * created; an existing branch is left where it is.
+   *
+   * Optional so an older server (which never sends it) still validates.
+   */
+  base_branch: z.string().nullable().optional(),
   approval: z.object({ requires_approval: z.array(z.string()) }),
   checkpoint_before: z.boolean(),
   lease_expires_at: z.string(),

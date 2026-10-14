@@ -49,6 +49,61 @@ describe("worktree manager", () => {
     expect(await git(dir, "log", "--format=%s")).toBe("agnt0: initial commit");
   });
 
+  // A ticket that depends on another has to start from that ticket's branch, not an empty trunk.
+  it("cuts a new branch from the base the server names", async () => {
+    await makeRepo(dir);
+    const trunk = await git(dir, "rev-parse", "HEAD");
+    const mgr = new WorktreeManager(dir);
+
+    // Finish tkt_1 with a commit of its own.
+    const first = await mgr.ensure(".agnt0/wt/tkt_1", "agnt0/tkt_1");
+    await writeFile(join(first.path, "a.txt"), "from tkt_1\n");
+    await finalizeWorktree(first.path, first.baseSha, "agnt0: tkt_1");
+    const tip = await git(dir, "rev-parse", "agnt0/tkt_1");
+    expect(tip).not.toBe(trunk);
+
+    // tkt_2 depends on it, so it starts at tkt_1's tip and can already see the file.
+    const second = await mgr.ensure(".agnt0/wt/tkt_2", "agnt0/tkt_2", "agnt0/tkt_1");
+    expect(second.baseSha).toBe(tip);
+    expect(await readFile(join(second.path, "a.txt"), "utf8")).toBe("from tkt_1\n");
+
+    // With no base it still starts from the trunk.
+    const third = await mgr.ensure(".agnt0/wt/tkt_3", "agnt0/tkt_3");
+    expect(third.baseSha).toBe(trunk);
+    expect(existsSync(join(third.path, "a.txt"))).toBe(false);
+  });
+
+  it("falls back to HEAD when the base is unknown locally or not a clean ref", async () => {
+    await makeRepo(dir);
+    const trunk = await git(dir, "rev-parse", "HEAD");
+    const mgr = new WorktreeManager(dir);
+
+    // A branch this clone has never heard of: branching from the trunk is emptier but always safe.
+    const missing = await mgr.ensure(".agnt0/wt/tkt_4", "agnt0/tkt_4", "agnt0/never_existed");
+    expect(missing.baseSha).toBe(trunk);
+
+    // Anything that would not survive sanitising is not used as a ref either.
+    for (const [i, bad] of ["--upload-pack=touch /tmp/pwned", "agnt0/tkt_1;rm -rf /", "../../etc"].entries()) {
+      const wt = await mgr.ensure(`.agnt0/wt/tkt_bad${i}`, `agnt0/tkt_bad${i}`, bad);
+      expect(wt.baseSha).toBe(trunk);
+    }
+  });
+
+  it("leaves an existing branch where it is, whatever base is passed", async () => {
+    await makeRepo(dir);
+    const mgr = new WorktreeManager(dir);
+    const first = await mgr.ensure(".agnt0/wt/tkt_1", "agnt0/tkt_1");
+    await writeFile(join(first.path, "a.txt"), "x\n");
+    await finalizeWorktree(first.path, first.baseSha, "agnt0: tkt_1");
+
+    // tkt_5's branch already exists at the trunk; a later fix step must not move it onto tkt_1.
+    await git(dir, "branch", "agnt0/tkt_5");
+    const at = await git(dir, "rev-parse", "agnt0/tkt_5");
+    const wt = await mgr.ensure(".agnt0/wt/tkt_5", "agnt0/tkt_5", "agnt0/tkt_1");
+    expect(wt.baseSha).toBe(at);
+    expect(await git(dir, "rev-parse", "agnt0/tkt_5")).toBe(at);
+  });
+
   it("refuses worktree paths outside .agnt0/wt", async () => {
     await makeRepo(dir);
     const mgr = new WorktreeManager(dir);

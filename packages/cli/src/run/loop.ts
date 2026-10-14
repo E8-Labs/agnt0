@@ -214,7 +214,7 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   try {
     if (step.worktree && !isAudit) {
       const mgr = new WorktreeManager(repoRoot);
-      const w = await mgr.ensure(step.worktree, step.branch);
+      const w = await mgr.ensure(step.worktree, step.branch, step.base_branch ?? null);
       cwd = w.path;
       wt = w;
       log(pc.dim(`  worktree ${relative(repoRoot, w.path)} on ${w.branch}${w.created ? " (new)" : ""}`));
