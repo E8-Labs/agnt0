@@ -939,6 +939,109 @@ export const ShareLinkCreateRequest = z.object({
 });
 export type ShareLinkCreateRequest = z.infer<typeof ShareLinkCreateRequest>;
 
+
+/* --------------------------------------------------------- canvas (M3) */
+
+/**
+ * A screen on the Canvas: a real route of the user's app, captured as an image.
+ * The Canvas shows what actually runs, so there is no wireframe document format — a screen is a
+ * screenshot plus where it came from.
+ */
+export const CanvasScreen = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  ticket_id: z.string().nullable(),
+  route: z.string(),
+  label: z.string(),
+  device: z.enum(["mobile", "tablet", "desktop"]),
+  /** Short-lived signed URL for the image, or null while a capture is pending. */
+  screenshot_url: z.string().nullable(),
+  width: z.number().int().nullable(),
+  height: z.number().int().nullable(),
+  version: z.number().int(),
+  /** How many comments on this screen are still open. */
+  open_comments: z.number().int(),
+  captured_at: z.string().nullable(),
+  created_at: z.string(),
+});
+export type CanvasScreen = z.infer<typeof CanvasScreen>;
+
+export const CanvasComment = z.object({
+  id: z.string(),
+  screen_id: z.string(),
+  author: z.string(),
+  body: z.string(),
+  status: z.enum(["open", "resolved"]),
+  /** Position as a fraction of the screen's width and height, or null for the screen as a whole. */
+  x: z.number().min(0).max(1).nullable(),
+  y: z.number().min(0).max(1).nullable(),
+  created_at: z.string(),
+  resolved_at: z.string().nullable(),
+});
+export type CanvasComment = z.infer<typeof CanvasComment>;
+
+export const CanvasScreenList = z.object({ screens: z.array(CanvasScreen) });
+export type CanvasScreenList = z.infer<typeof CanvasScreenList>;
+export const CanvasCommentList = z.object({ comments: z.array(CanvasComment) });
+export type CanvasCommentList = z.infer<typeof CanvasCommentList>;
+
+export const CanvasScreenCreateRequest = z.object({
+  route: z.string().max(400),
+  label: z.string().min(1).max(140),
+  device: z.enum(["mobile", "tablet", "desktop"]).default("desktop"),
+  ticket_id: z.string().optional(),
+  /** Blob key of an already-uploaded screenshot, as `agnt0 qa` uploads them. */
+  screenshot_key: z.string().max(400).optional(),
+  width: z.number().int().positive().max(10_000).optional(),
+  height: z.number().int().positive().max(20_000).optional(),
+  qa_run_id: z.string().optional(),
+});
+export type CanvasScreenCreateRequest = z.infer<typeof CanvasScreenCreateRequest>;
+
+export const CanvasCommentCreateRequest = z.object({
+  body: z.string().min(1).max(4000),
+  x: z.number().min(0).max(1).optional(),
+  y: z.number().min(0).max(1).optional(),
+});
+export type CanvasCommentCreateRequest = z.infer<typeof CanvasCommentCreateRequest>;
+
+export const CanvasCommentPatch = z.object({ status: z.enum(["open", "resolved"]) });
+export type CanvasCommentPatch = z.infer<typeof CanvasCommentPatch>;
+
+/**
+ * An inspiration item. We never rehost someone's design work: the item is a link to the source with
+ * its own preview image, and opening it takes the user to the original site.
+ */
+export const InspoItem = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  kind: z.enum(["visual", "component_library"]),
+  source: z.enum(["dribbble", "awwwards", "mobbin", "pinterest", "library", "url"]),
+  url: z.string(),
+  title: z.string(),
+  thumbnail_url: z.string().nullable(),
+  tags: z.array(z.string()),
+  status: z.enum(["suggested", "liked", "removed"]),
+  added_by: z.string(),
+  created_at: z.string(),
+});
+export type InspoItem = z.infer<typeof InspoItem>;
+
+export const InspoList = z.object({ items: z.array(InspoItem) });
+export type InspoList = z.infer<typeof InspoList>;
+
+export const InspoCreateRequest = z.object({
+  url: z.string().url().max(2000),
+  title: z.string().max(200).optional(),
+  kind: z.enum(["visual", "component_library"]).default("visual"),
+  thumbnail_url: z.string().url().max(2000).optional(),
+  tags: z.array(z.string().max(40)).max(12).optional(),
+});
+export type InspoCreateRequest = z.infer<typeof InspoCreateRequest>;
+
+export const InspoPatch = z.object({ status: z.enum(["suggested", "liked", "removed"]) });
+export type InspoPatch = z.infer<typeof InspoPatch>;
+
 export const m2routes = {
   checkpoints: (projectId: string) => `/v1/projects/${projectId}/checkpoints`,
   checkpointRestore: (checkpointId: string) => `/v1/checkpoints/${checkpointId}/restore`,
@@ -958,6 +1061,12 @@ export const m2routes = {
   auditFindingsDismiss: (auditId: string) => `/v1/audits/${auditId}/findings/dismiss`,
   shareLinks: (projectId: string) => `/v1/projects/${projectId}/share-links`,
   shareLink: (id: string) => `/v1/share-links/${id}`,
+  canvasScreens: (projectId: string) => `/v1/projects/${projectId}/canvas/screens`,
+  canvasScreen: (screenId: string) => `/v1/canvas/screens/${screenId}`,
+  canvasComments: (screenId: string) => `/v1/canvas/screens/${screenId}/comments`,
+  canvasComment: (commentId: string) => `/v1/canvas/comments/${commentId}`,
+  inspo: (projectId: string) => `/v1/projects/${projectId}/inspo`,
+  inspoItem: (id: string) => `/v1/inspo/${id}`,
 } as const;
 
 // added by api — type aliases for the M1/M2 response schemas above (types only; no wire change).
