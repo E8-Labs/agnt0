@@ -715,6 +715,8 @@ export const AgentStats = z.object({
   plan_share: z.number().min(0).max(1).optional(),
   /** Which models it ran on, most-used first. */
   model_mix: z.array(z.object({ model: z.string(), steps: z.number().int() })),
+  /** Skills its steps have loaded, most-loaded first. Empty until one has run with a skill. */
+  skills: z.array(z.object({ slug: z.string(), loads: z.number().int() })).default([]),
   last_active_at: z.string().nullable(),
 });
 export type AgentStats = z.infer<typeof AgentStats>;
