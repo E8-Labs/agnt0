@@ -907,6 +907,38 @@ export const AuditFindingTicketRequest = z.object({ finding_ids: z.array(z.strin
 export const AuditFindingTicketResponse = z.object({ tickets: z.array(Ticket) });
 export const AuditFindingDismissRequest = z.object({ finding_ids: z.array(z.string()).min(1).max(50) });
 
+
+/* ---------------------------------------------------- share links (M3) */
+
+/**
+ * A temporary public link to the user's running preview. The tunnel runs on their machine; this is
+ * the record of it, so the dashboard can show what is live and revoke it.
+ */
+export const ShareLink = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  url: z.string(),
+  kind: z.enum(["tunnel", "deploy"]),
+  label: z.string().nullable(),
+  /** active | expired | revoked | closed — derived, so a caller never has to compare clocks. */
+  status: z.enum(["active", "expired", "revoked", "closed"]),
+  expires_at: z.string(),
+  created_at: z.string(),
+});
+export type ShareLink = z.infer<typeof ShareLink>;
+
+export const ShareLinkList = z.object({ links: z.array(ShareLink) });
+export type ShareLinkList = z.infer<typeof ShareLinkList>;
+
+export const ShareLinkCreateRequest = z.object({
+  url: z.string().url().max(2000),
+  kind: z.enum(["tunnel", "deploy"]).default("tunnel"),
+  label: z.string().max(120).optional(),
+  /** How long the link should live. Defaults to 24 hours; the server caps it at 7 days. */
+  ttl_hours: z.number().int().min(1).max(168).optional(),
+});
+export type ShareLinkCreateRequest = z.infer<typeof ShareLinkCreateRequest>;
+
 export const m2routes = {
   checkpoints: (projectId: string) => `/v1/projects/${projectId}/checkpoints`,
   checkpointRestore: (checkpointId: string) => `/v1/checkpoints/${checkpointId}/restore`,
@@ -924,6 +956,8 @@ export const m2routes = {
   audit: (auditId: string) => `/v1/audits/${auditId}`,
   auditFindingsTicket: (auditId: string) => `/v1/audits/${auditId}/findings/ticket`,
   auditFindingsDismiss: (auditId: string) => `/v1/audits/${auditId}/findings/dismiss`,
+  shareLinks: (projectId: string) => `/v1/projects/${projectId}/share-links`,
+  shareLink: (id: string) => `/v1/share-links/${id}`,
 } as const;
 
 // added by api — type aliases for the M1/M2 response schemas above (types only; no wire change).
