@@ -581,6 +581,11 @@ export const RealtimeEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("qa.completed"), qa_run: z.lazy(() => QaRun) }),
   z.object({ type: z.literal("audit.progress"), audit_id: z.string(), stage: z.string(), at: z.string() }),
   z.object({ type: z.literal("audit.completed"), audit: z.lazy(() => AuditRun) }),
+  /**
+   * The project moved phase. Derived from the board, so it arrives alongside the ticket or QA event
+   * that caused it; a client that only shows the track can act on this alone.
+   */
+  z.object({ type: z.literal("project.phase"), project_id: z.string(), phase: Phase, at: z.string() }),
 ]);
 export type RealtimeEvent = z.infer<typeof RealtimeEvent>;
 
