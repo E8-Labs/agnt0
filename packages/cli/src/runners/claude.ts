@@ -4,7 +4,7 @@ import { commandVersion, runLines } from "./spawn.js";
 import { CLAUDE_MODEL_ALIASES, mapClaudePermissions } from "./tools.js";
 import type { RunnerAdapter, RunnerInput, RunnerResult } from "./types.js";
 
-export function claudeArgs(step: Step): string[] {
+export function claudeArgs(step: Step, pluginDirs: string[] = []): string[] {
   const perms = mapClaudePermissions(step.allowed_tools, step.scope, step.approval.requires_approval);
   const args = [
     "-p",
@@ -19,6 +19,9 @@ export function claudeArgs(step: Step): string[] {
     CLAUDE_MODEL_ALIASES[step.model],
   ];
   if (perms.permissionMode) args.push("--permission-mode", perms.permissionMode);
+  // This session only: the skills are gone from disk when the step ends, and nothing is written to
+  // the user's global settings or their repo.
+  for (const dir of pluginDirs) args.push(`--plugin-dir=${dir}`);
   // `--flag=value` keeps every rule attached to its flag, so no value can ever be read as an option.
   for (const t of perms.allowed) args.push(`--allowedTools=${t}`);
   for (const t of perms.disallowed) args.push(`--disallowedTools=${t}`);
@@ -36,9 +39,9 @@ export class ClaudeRunner implements RunnerAdapter {
     return (await commandVersion(this.bin)) !== null;
   }
 
-  async run({ step, cwd, signal, onEvent, env }: RunnerInput): Promise<RunnerResult> {
+  async run({ step, cwd, signal, onEvent, env, pluginDirs }: RunnerInput): Promise<RunnerResult> {
     const parser = new ClaudeStreamParser(CLAUDE_MODEL_ALIASES[step.model]);
-    const args = claudeArgs(step); // throws on an unsafe tool grant before anything runs
+    const args = claudeArgs(step, pluginDirs ?? []); // throws on an unsafe tool grant before anything runs
     const proc = await runLines(this.bin, args, {
       cwd,
       input: step.prompt,

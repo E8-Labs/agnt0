@@ -8,6 +8,11 @@ export interface RunnerInput {
   onEvent: (event: StepEvent) => void;
   /** Project env vars to add to the runner's environment (already filtered; never logged). */
   env?: Record<string, string>;
+  /**
+   * Directories holding this step's skills, already verified and unpacked. Claude Code loads them
+   * with `--plugin-dir`; Codex reads its own from the worktree, so it ignores this.
+   */
+  pluginDirs?: string[];
 }
 
 export interface RunnerResult {

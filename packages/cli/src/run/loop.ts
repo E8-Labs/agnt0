@@ -16,6 +16,7 @@ import { debug } from "../config.js";
 import { ApiHttpError, CliError } from "../errors.js";
 import { headSha } from "../git.js";
 import { extractJsonOutput } from "../runners/json-output.js";
+import { EMPTY_SKILLS, loadStepSkills, type LoadedSkills } from "../runners/skills.js";
 import { zeroUsage, type RunnerAdapter } from "../runners/types.js";
 import { truncate } from "../ui.js";
 import { CLI_VERSION } from "../version.js";
@@ -337,6 +338,19 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
     return fail(`Workspace setup failed: ${msg}`);
   }
 
+  // Skills for this step only: verified, unpacked outside the repo where the runner allows it, and
+  // deleted below. A skill that fails to load is reported and skipped rather than failing the step.
+  let skills: LoadedSkills = EMPTY_SKILLS;
+  try {
+    skills = await loadStepSkills(step, { cwd, repoRoot });
+    if (skills.loaded.length) {
+      log(pc.dim(`  skills ${skills.loaded.map((s) => `${s.slug}@${s.version}${s.cached ? "" : " (step only)"}`).join(", ")}`));
+    }
+    for (const p of skills.problems) log(pc.yellow(`  ! skill not loaded — ${truncate(p, 160)}`));
+  } catch (e) {
+    log(pc.yellow(`  ! skills could not be prepared: ${truncate(e instanceof Error ? e.message : String(e), 160)}`));
+  }
+
   let lastShown = 0;
   const approvals: string[] = [];
   let result: Awaited<ReturnType<RunnerAdapter["run"]>>;
@@ -344,6 +358,7 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
     result = await runner.run({
       step,
       cwd,
+      ...(skills.pluginDirs.length ? { pluginDirs: skills.pluginDirs } : {}),
       signal: ac.signal,
       ...(deps.env && Object.keys(deps.env).length ? { env: deps.env } : {}),
       onEvent: (e) => {
@@ -364,12 +379,15 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
     });
   } catch (e) {
     deps.signal.removeEventListener("abort", onAbort);
+    await skills.cleanup();
     const msg = e instanceof Error ? e.message : String(e);
     log(pc.red(`  ${msg}`));
     const res = await fail(msg);
     return deps.signal.aborted ? "interrupted" : res;
   }
   deps.signal.removeEventListener("abort", onAbort);
+  // Before the diff is measured: our own skills do not outlive the step that used them.
+  await skills.cleanup();
 
   let diff: DiffResult | undefined;
   if (isAudit) {
