@@ -693,6 +693,8 @@ export const ActivityEvent = z.object({
   data: z.record(z.unknown()).optional(),
 });
 export const ActivityResponse = z.object({ steps: z.array(ActivityStep), events: z.array(ActivityEvent) });
+export type ActivityStep = z.infer<typeof ActivityStep>;
+export type ActivityEvent = z.infer<typeof ActivityEvent>;
 export type ActivityResponse = z.infer<typeof ActivityResponse>;
 
 /**
