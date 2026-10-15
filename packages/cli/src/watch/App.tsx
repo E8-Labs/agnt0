@@ -43,6 +43,8 @@ function Tile({ t, now, width }: { t: AgentTile; now: number; width: number }) {
       <Text dimColor wrap="truncate">
         {elapsed(t.startedAt, t.endedAt, now)} · {t.events} events{t.credits !== null ? ` · ${t.credits} cr` : ""}
         {t.tokens !== null ? ` · ${compactTokens(t.tokens)} tok` : ""}
+        {/* Only on a step that actually read compressed tool output; silence means it read none. */}
+        {t.tokensSaved ? ` · −${compactTokens(t.tokensSaved)} saved` : ""}
       </Text>
     </Box>
   );
@@ -135,6 +137,13 @@ export default function WatchApp({ projectLabel, source }: { projectLabel: strin
             {bar(u.week.used, u.week.allowance)} {u.week.used}/{u.week.allowance}
             <Text dimColor>   extra </Text>
             {u.wallet.balance}
+            {state.savedTokens > 0 ? (
+              <Text>
+                <Text dimColor>   saved </Text>
+                <Text color="green">{compactTokens(state.savedTokens)} tok</Text>
+                <Text dimColor> of tool output</Text>
+              </Text>
+            ) : null}
           </Text>
         ) : (
           <Text dimColor>loading usage…</Text>

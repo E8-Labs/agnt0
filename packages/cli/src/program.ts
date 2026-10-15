@@ -10,6 +10,7 @@ import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { runCommand } from "./commands/run.js";
 import { setupTokenCommand } from "./commands/setup-token.js";
+import { shareCommand } from "./commands/share.js";
 import { statusCommand } from "./commands/status.js";
 import { usageCommand } from "./commands/usage.js";
 import { watchCommand } from "./commands/watch.js";
@@ -163,6 +164,17 @@ export function buildProgram(makeContext: () => Context = () => createContext())
     .description("restore a checkpoint on a new safety branch (a pre-rollback checkpoint is taken first)")
     .option("-y, --yes", "don't ask for confirmation")
     .action(wrap((ctx, id: string, o: { yes?: boolean }) => rollbackCommand(ctx, id, o)));
+
+  program
+    .command("share")
+    .description("open a temporary public link to the app running on this machine")
+    .option("--url <url>", "what to share (default: http://localhost:5173)")
+    .option("--port <port>", "share localhost on this port instead")
+    .option("--ttl <hours>", "how long the link should live (default 24, max 168)")
+    .option("--label <text>", "a note shown on the dashboard")
+    .option("--list", "list the live links for this project")
+    .option("--revoke <idOrUrl>", "revoke one")
+    .action(wrap((ctx, opts) => shareCommand(ctx, opts)));
 
   program
     .command("setup-token")

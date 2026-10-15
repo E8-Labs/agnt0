@@ -19,4 +19,6 @@ prompts, no routing rules, no pricing math. The CLI receives one step at a time 
 - Config: `AGNT0_API_URL` (default `http://localhost:8787`), `AGNT0_WEB_URL` (default `http://localhost:3000`),
   `AGNT0_TOKEN` for CI.
 - Tests: vitest. Every command has at least a smoke test with the API mocked.
+- Output style: `packages/cli/STYLE.md` — the symbols, tables, meters and error shape every command
+  shares. Read it before adding a command or changing what one prints.
 - License: Elastic License 2.0 (placeholder pending legal review). Third-party notices in `THIRD_PARTY_NOTICES`.

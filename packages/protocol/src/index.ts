@@ -565,6 +565,8 @@ export const RealtimeEvent = z.discriminatedUnion("type", [
     credits_charged: z.number(),
     /** Tokens the step reported (input + output + cache reads), for the live agent tiles. */
     tokens: z.number().optional(),
+    /** Tool-output tokens compression kept out of the model's context on this step, when any. */
+    tokens_saved: z.number().optional(),
     at: z.string(),
   }),
   z.object({ type: z.literal("ticket.updated"), ticket: Ticket }),

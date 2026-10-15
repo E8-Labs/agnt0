@@ -12,6 +12,8 @@ export interface AgentTile {
   credits: number | null;
   /** Tokens the step reported, once it has finished. */
   tokens: number | null;
+  /** Tool-output tokens compression kept out of this step's context, when any. */
+  tokensSaved: number | null;
   endedAt: string | null;
 }
 
@@ -31,6 +33,8 @@ export interface FeedItem {
 
 export interface WatchState {
   tiles: AgentTile[];
+  /** Tool-output tokens compression saved since this watch started. */
+  savedTokens: number;
   approvals: Ticket[];
   tickets: Record<string, Ticket>;
   feed: FeedItem[];
@@ -44,6 +48,7 @@ export interface WatchState {
 
 export const initialWatchState: WatchState = {
   tiles: [],
+  savedTokens: 0,
   approvals: [],
   tickets: {},
   feed: [],
@@ -81,6 +86,7 @@ export function reduceWatch(state: WatchState, ev: RealtimeEvent): WatchState {
         status: "running",
         credits: null,
         tokens: null,
+        tokensSaved: null,
         endedAt: null,
       };
       const tiles = runningFirst([tile, ...state.tiles.filter((t) => t.stepId !== ev.step_id)]);
@@ -96,9 +102,21 @@ export function reduceWatch(state: WatchState, ev: RealtimeEvent): WatchState {
     }
     case "step.completed": {
       const ok = ev.outcome === "succeeded";
-      const tiles = runningFirst(state.tiles.map((t) => (t.stepId === ev.step_id ? { ...t, status: ok ? ("succeeded" as const) : ("failed" as const), credits: ev.credits_charged, tokens: ev.tokens ?? null, endedAt: ev.at } : t)));
+      const tiles = runningFirst(
+        state.tiles.map((t) =>
+          t.stepId === ev.step_id
+            ? { ...t, status: ok ? ("succeeded" as const) : ("failed" as const), credits: ev.credits_charged, tokens: ev.tokens ?? null, tokensSaved: ev.tokens_saved ?? null, endedAt: ev.at }
+            : t,
+        ),
+      );
       const spent = `${ev.credits_charged} credits${ev.tokens ? ` · ${compactTokens(ev.tokens)} tokens` : ""}`;
-      return { ...state, tiles, feed: pushFeed(state.feed, { at: ev.at, kind: ok ? "done" : "fail", text: `step ${ev.outcome} · ${spent}` }) };
+      return {
+        ...state,
+        tiles,
+        // Totalled over the run, for the strip at the bottom: this is measured, not projected.
+        savedTokens: state.savedTokens + (ev.tokens_saved ?? 0),
+        feed: pushFeed(state.feed, { at: ev.at, kind: ok ? "done" : "fail", text: `step ${ev.outcome} · ${spent}` }),
+      };
     }
     case "ticket.updated": {
       const tickets = { ...state.tickets, [ev.ticket.id]: ev.ticket };
