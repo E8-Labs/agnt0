@@ -51,7 +51,11 @@ export function describeError(err: unknown): { message: string; hint?: string } 
       case "limit_reached":
         return { message: b.message, hint: "Run `agnt0 usage` to see when it resets, or `agnt0 credits use`." };
       case "forbidden":
-        return { message: "This project belongs to a different account.", hint: "Check `agnt0 status`, or link this repo again with `agnt0 link`." };
+        // The server says why — a CI token reaching past what it may do, a web-only route, a project
+        // on another account. Printing our own guess instead sent people to `agnt0 link` for all three.
+        return b.message
+          ? { message: b.message, ...(/belongs to another account/i.test(b.message) ? { hint: "Check `agnt0 status`, or link this repo again with `agnt0 link`." } : {}) }
+          : { message: "That isn't allowed for this account.", hint: "Check `agnt0 status`." };
       case "not_found":
         return { message: b.message || "Not found." };
       case "protocol_outdated":

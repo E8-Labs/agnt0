@@ -9,6 +9,7 @@ import { initCommand, linkCommand } from "./commands/init.js";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
 import { runCommand } from "./commands/run.js";
+import { setupTokenCommand } from "./commands/setup-token.js";
 import { statusCommand } from "./commands/status.js";
 import { usageCommand } from "./commands/usage.js";
 import { watchCommand } from "./commands/watch.js";
@@ -162,6 +163,15 @@ export function buildProgram(makeContext: () => Context = () => createContext())
     .description("restore a checkpoint on a new safety branch (a pre-rollback checkpoint is taken first)")
     .option("-y, --yes", "don't ask for confirmation")
     .action(wrap((ctx, id: string, o: { yes?: boolean }) => rollbackCommand(ctx, id, o)));
+
+  program
+    .command("setup-token")
+    .description("mint a long-lived token for CI (build and QA only, scoped to one project)")
+    .option("--name <name>", "what to call it, so you can tell two apart")
+    .option("--project <id>", "the project it may build (defaults to the one linked here)")
+    .option("--list", "list the CI tokens on this account")
+    .option("--revoke <nameOrId>", "revoke one")
+    .action(wrap((ctx, opts) => setupTokenCommand(ctx, opts)));
 
   program.command("open").description("open the project dashboard in your browser").action(wrap((ctx) => openCommand(ctx)));
 

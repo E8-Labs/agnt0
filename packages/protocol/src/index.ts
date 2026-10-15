@@ -1207,6 +1207,39 @@ export const SavingsResponse = z.object({
 });
 export type SavingsResponse = z.infer<typeof SavingsResponse>;
 
+/* ------------------------------------------------------- CI tokens (M3) */
+
+/**
+ * A long-lived token for CI, scoped to one project. The secret itself is returned once, when it is
+ * minted, and never again — so this shape never carries it except in `CiTokenCreated`.
+ */
+export const CiToken = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  name: z.string(),
+  expires_at: z.string(),
+  last_used_at: z.string().nullable(),
+  created_at: z.string(),
+});
+export type CiToken = z.infer<typeof CiToken>;
+
+export const CiTokenList = z.object({ tokens: z.array(CiToken) });
+export type CiTokenList = z.infer<typeof CiTokenList>;
+
+export const CiTokenCreateRequest = z.object({
+  project_id: z.string(),
+  /** So two tokens can be told apart when one needs revoking. */
+  name: z.string().min(1).max(60).optional(),
+});
+export type CiTokenCreateRequest = z.infer<typeof CiTokenCreateRequest>;
+
+export const CiTokenCreated = z.object({
+  token: CiToken,
+  /** Shown once. Nothing can recover it afterwards. */
+  secret: z.string(),
+});
+export type CiTokenCreated = z.infer<typeof CiTokenCreated>;
+
 export const m2routes = {
   checkpoints: (projectId: string) => `/v1/projects/${projectId}/checkpoints`,
   checkpointRestore: (checkpointId: string) => `/v1/checkpoints/${checkpointId}/restore`,
@@ -1233,6 +1266,9 @@ export const m2routes = {
   inspo: (projectId: string) => `/v1/projects/${projectId}/inspo`,
   inspoItem: (id: string) => `/v1/inspo/${id}`,
   savings: (projectId: string) => `/v1/projects/${projectId}/savings`,
+  setupToken: "/v1/cli/setup-token",
+  ciTokens: "/v1/cli/tokens",
+  ciToken: (id: string) => `/v1/cli/tokens/${id}`,
   skills: "/v1/skills",
   projectSkills: (projectId: string) => `/v1/projects/${projectId}/skills`,
   projectSkill: (projectId: string, skillId: string) => `/v1/projects/${projectId}/skills/${skillId}`,

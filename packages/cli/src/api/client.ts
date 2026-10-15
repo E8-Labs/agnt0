@@ -66,6 +66,9 @@ export class ApiClient {
   put<T>(path: string, opts: RequestOptions<T> = {}): Promise<T> {
     return this.request("PUT", path, opts);
   }
+  delete<T>(path: string, opts: RequestOptions<T> = {}): Promise<T> {
+    return this.request("DELETE", path, opts);
+  }
 
   async request<T>(method: string, path: string, opts: RequestOptions<T> = {}): Promise<T> {
     const useAuth = opts.auth !== false;
