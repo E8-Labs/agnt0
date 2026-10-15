@@ -49,6 +49,7 @@ const auditStep: Step = {
   checkpoint_before: true,
   lease_expires_at: "2026-10-13T13:00:00Z",
   max_turns: 120,
+  skills: [],
 };
 
 const report: AuditOutput = {

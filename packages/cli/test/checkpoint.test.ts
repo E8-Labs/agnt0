@@ -182,6 +182,7 @@ describe("checkpoints in run", () => {
       checkpoint_before: true,
       lease_expires_at: "2026-10-13T13:00:00Z",
       max_turns: 5,
+      skills: [],
     };
     const steps = [{ kind: "step", step }, { kind: "idle", reason: "no_ready_tickets", message: "none" }];
     api.on("POST", routes.heartbeat, () => ({ status: 204 }));

@@ -385,6 +385,42 @@ export const Compression = z.object({
   write: z.enum(["full", "terse"]),
 });
 
+/**
+ * A skill as it reaches one step. Never a GitHub link to clone at run time: the registry has already
+ * pinned, checked and packaged it, so the CLI only has to verify a checksum.
+ */
+export const StepSkillInline = z.object({
+  id: z.string(),
+  /** Directory and skill name, lowercase and dash-separated, e.g. `agnt0-frontend-rules`. */
+  slug: z.string(),
+  version: z.string(),
+  /** The whole SKILL.md, frontmatter included, for a skill that is instructions and nothing else. */
+  inline: z.string(),
+  /** Always false: an inline skill costs nothing to resend, and ours are deleted after the step. */
+  cache: z.literal(false),
+});
+export type StepSkillInline = z.infer<typeof StepSkillInline>;
+
+export const StepSkillBundle = z.object({
+  id: z.string(),
+  slug: z.string(),
+  version: z.string(),
+  /** Hex sha256 of the bundle. The CLI verifies it before unpacking and refuses the skill on mismatch. */
+  sha256: z.string(),
+  /** Short-lived signed download link. */
+  url: z.string(),
+  /**
+   * Whether the CLI may keep the unpacked bundle between steps. True for open-source skills, whose
+   * data files are large and whose contents are public; false for ours, which are deleted after the step.
+   */
+  cache: z.boolean(),
+});
+export type StepSkillBundle = z.infer<typeof StepSkillBundle>;
+
+/** Inline first: it is the shape with a required `inline`, so the union never mistakes one for the other. */
+export const StepSkill = z.union([StepSkillInline, StepSkillBundle]);
+export type StepSkill = z.infer<typeof StepSkill>;
+
 export const Step = z.object({
   step_id: z.string(),
   project_id: z.string(),
@@ -411,6 +447,12 @@ export const Step = z.object({
    * Optional so an older server (which never sends it) still validates.
    */
   base_branch: z.string().nullable().optional(),
+  /**
+   * The skills the server matched to this step — a few at most, so matching stays sharp even on a
+   * project that holds dozens. Instruction-only skills ride inline; anything with files comes as a
+   * checksummed bundle. Defaulted so an older server (which never sends it) still validates.
+   */
+  skills: z.array(StepSkill).max(12).default([]),
   approval: z.object({ requires_approval: z.array(z.string()) }),
   checkpoint_before: z.boolean(),
   lease_expires_at: z.string(),
@@ -1042,6 +1084,79 @@ export type InspoCreateRequest = z.infer<typeof InspoCreateRequest>;
 export const InspoPatch = z.object({ status: z.enum(["suggested", "liked", "removed"]) });
 export type InspoPatch = z.infer<typeof InspoPatch>;
 
+/* --------------------------------------------------------- skills (M3) */
+
+/**
+ * How a skill reaches an agent. `core` is ours and locked to the role, `added` is the user's pick from
+ * the library, `project` is matched by the server from the stack and the ticket.
+ */
+export const SkillTier = z.enum(["core", "added", "project"]);
+export type SkillTier = z.infer<typeof SkillTier>;
+
+/** A library entry: one skill at its latest approved version. */
+export const SkillSummary = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  summary: z.string(),
+  /** `agnt0` is our own text, `curated` is reviewed open source, `private` is the user's own import. */
+  source: z.enum(["agnt0", "curated", "private"]),
+  version: z.string(),
+  /** Verified means the registry's checks passed at this version: license, scripts, both runners. */
+  verified: z.boolean(),
+  runners: z.array(Runner),
+  /** Roles that always carry this skill. The user cannot remove it from them. */
+  core_roles: z.array(Role),
+  /** Roles the server may match it to when a ticket fits. */
+  match_roles: z.array(Role),
+  /** Tools it needs on the user's machine, e.g. `python3`. `agnt0 doctor` checks these. */
+  needs_tools: z.array(z.string()),
+  /** 0 for an instruction-only skill that rides inline. */
+  bytes: z.number().int(),
+  origin_url: z.string().nullable(),
+  license: z.string().nullable(),
+  updated_at: z.string(),
+});
+export type SkillSummary = z.infer<typeof SkillSummary>;
+
+export const SkillList = z.object({ skills: z.array(SkillSummary) });
+export type SkillList = z.infer<typeof SkillList>;
+
+/** Why a role carries a skill, so the card can say "Frontend Developer (auto)" and mean it. */
+export const SkillUse = z.object({
+  role: Role,
+  reason: z.enum(["core", "pinned", "matched", "added"]),
+});
+
+export const ProjectSkill = z.object({
+  skill: SkillSummary,
+  tier: SkillTier,
+  used_by: z.array(SkillUse),
+  /** Null for core and server-matched skills, which nobody added by hand. */
+  added_at: z.string().nullable(),
+  /** How many steps on this project have loaded it. */
+  loads: z.number().int(),
+});
+export type ProjectSkill = z.infer<typeof ProjectSkill>;
+
+export const ProjectSkillList = z.object({
+  skills: z.array(ProjectSkill),
+  /** Added skills only — core and matched ones do not count against the limit. */
+  added_count: z.number().int(),
+  added_limit: z.number().int(),
+});
+export type ProjectSkillList = z.infer<typeof ProjectSkillList>;
+
+export const ProjectSkillAddRequest = z.object({ skill_id: z.string() });
+export type ProjectSkillAddRequest = z.infer<typeof ProjectSkillAddRequest>;
+
+/** `auto` clears an override and puts the skill back under normal matching. */
+export const AgentSkillOverrideRequest = z.object({
+  skill_id: z.string(),
+  mode: z.enum(["pin", "exclude", "auto"]),
+});
+export type AgentSkillOverrideRequest = z.infer<typeof AgentSkillOverrideRequest>;
+
 export const m2routes = {
   checkpoints: (projectId: string) => `/v1/projects/${projectId}/checkpoints`,
   checkpointRestore: (checkpointId: string) => `/v1/checkpoints/${checkpointId}/restore`,
@@ -1067,6 +1182,12 @@ export const m2routes = {
   canvasComment: (commentId: string) => `/v1/canvas/comments/${commentId}`,
   inspo: (projectId: string) => `/v1/projects/${projectId}/inspo`,
   inspoItem: (id: string) => `/v1/inspo/${id}`,
+  skills: "/v1/skills",
+  projectSkills: (projectId: string) => `/v1/projects/${projectId}/skills`,
+  projectSkill: (projectId: string, skillId: string) => `/v1/projects/${projectId}/skills/${skillId}`,
+  agentSkills: (projectId: string, role: string) => `/v1/projects/${projectId}/agents/${role}/skills`,
+  /** Signed, short-lived; the CLI only ever gets this URL from a step. */
+  skillBundle: (skillId: string, version: string) => `/v1/skill-bundles/${skillId}/${version}`,
 } as const;
 
 // added by api — type aliases for the M1/M2 response schemas above (types only; no wire change).

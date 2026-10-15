@@ -200,6 +200,11 @@ export function mapClaudePermissions(allowed: string[], scope: string[], require
         case "todo":
           out.add("TodoWrite");
           break;
+        case "skill":
+          // Loading one of the step's skills. Granted only when the step carries skills; without it a
+          // `--allowedTools` run can see a skill's description and never be allowed to read it.
+          out.add("Skill");
+          break;
         case "bash":
         case "shell":
           // Never an unrestricted shell: the server must name commands (bash:<pattern>).

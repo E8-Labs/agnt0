@@ -123,7 +123,7 @@ describe("env in run", () => {
     const step: Step = {
       step_id: "stp_1", project_id: "prj_1", ticket_id: null, kind: "plan", role: "planner", runner: "claude", model: "opus", prompt: "p",
       output_schema: null, compression: { read: [], write: "full" }, allowed_tools: ["read"], scope: [], worktree: null, branch: null,
-      approval: { requires_approval: [] }, checkpoint_before: false, lease_expires_at: "2026-10-13T13:00:00Z", max_turns: 5,
+      approval: { requires_approval: [] }, checkpoint_before: false, lease_expires_at: "2026-10-13T13:00:00Z", max_turns: 5, skills: [],
     };
     const steps = [{ kind: "step", step }];
     api.on("POST", routes.heartbeat, () => ({ status: 204 }));

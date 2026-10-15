@@ -44,6 +44,7 @@ function step(over: Partial<Step> = {}): Step {
     checkpoint_before: true,
     lease_expires_at: "2026-10-13T13:00:00Z",
     max_turns: 30,
+    skills: [],
     ...over,
   };
 }
