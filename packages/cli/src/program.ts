@@ -175,6 +175,18 @@ export function buildProgram(makeContext: () => Context = () => createContext())
 
   program.command("upgrade").description("open the plans page").action(wrap((ctx) => upgradeCommand(ctx)));
 
+  // Not a user-facing command: Claude Code re-enters this CLI as the PostToolUse hook for a step
+  // that may compress. Hidden because typing it does nothing useful, and it reads its call on stdin.
+  program
+    .command("__compress-hook", { hidden: true })
+    .description("internal: compress one tool result for the step that registered this hook")
+    .requiredOption("--dir <dir>", "the step's compression directory")
+    .requiredOption("--kinds <kinds>", "comma-separated kinds this step may compress")
+    .action(async (opts: { dir: string; kinds: string }) => {
+      const { runCompressHook } = await import("./compress/hook.js");
+      await runCompressHook(["--dir", opts.dir, "--kinds", opts.kinds]);
+    });
+
   return program;
 }
 

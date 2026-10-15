@@ -17,6 +17,7 @@ import { ApiHttpError, CliError } from "../errors.js";
 import { headSha } from "../git.js";
 import { extractJsonOutput } from "../runners/json-output.js";
 import { EMPTY_SKILLS, loadStepSkills, type LoadedSkills } from "../runners/skills.js";
+import { NO_COMPRESSION, startCompressSession, type CompressSession } from "../compress/session.js";
 import { zeroUsage, type RunnerAdapter } from "../runners/types.js";
 import { truncate } from "../ui.js";
 import { CLI_VERSION } from "../version.js";
@@ -351,6 +352,17 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
     log(pc.yellow(`  ! skills could not be prepared: ${truncate(e instanceof Error ? e.message : String(e), 160)}`));
   }
 
+  // Compression is the server's call, per step: it says which kinds of tool output may be shortened,
+  // and the hook does it locally. Claude Code only; Codex has no equivalent hook.
+  let compression: CompressSession = NO_COMPRESSION;
+  if (step.runner === "claude" && step.compression.read.length) {
+    try {
+      compression = await startCompressSession(step.step_id, [...step.compression.read]);
+    } catch (e) {
+      debug("compression session failed", e);
+    }
+  }
+
   let lastShown = 0;
   const approvals: string[] = [];
   let result: Awaited<ReturnType<RunnerAdapter["run"]>>;
@@ -359,6 +371,7 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
       step,
       cwd,
       ...(skills.pluginDirs.length ? { pluginDirs: skills.pluginDirs } : {}),
+      ...(compression.settingsPath ? { settingsPath: compression.settingsPath } : {}),
       signal: ac.signal,
       ...(deps.env && Object.keys(deps.env).length ? { env: deps.env } : {}),
       onEvent: (e) => {
@@ -380,6 +393,7 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   } catch (e) {
     deps.signal.removeEventListener("abort", onAbort);
     await skills.cleanup();
+    await compression.cleanup();
     const msg = e instanceof Error ? e.message : String(e);
     log(pc.red(`  ${msg}`));
     const res = await fail(msg);
@@ -388,6 +402,13 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
   deps.signal.removeEventListener("abort", onAbort);
   // Before the diff is measured: our own skills do not outlive the step that used them.
   await skills.cleanup();
+  // Total what the hook shortened before its directory goes, so the step reports a real saving.
+  const toolTokens = await compression.totals();
+  await compression.cleanup();
+  if (toolTokens.raw_tool_tokens > toolTokens.sent_tool_tokens) {
+    const saved = toolTokens.raw_tool_tokens - toolTokens.sent_tool_tokens;
+    log(pc.dim(`  compression saved ~${saved.toLocaleString()} tokens of tool output`));
+  }
 
   let diff: DiffResult | undefined;
   if (isAudit) {
@@ -426,7 +447,7 @@ async function executeStep(step: Step, deps: ExecDeps): Promise<StepCompleteResp
     summary: truncate(result.finalText || error || "", 8000),
     ...(output !== undefined ? { output } : {}),
     ...(diff ? { diff } : {}),
-    usage: result.usage,
+    usage: { ...result.usage, ...toolTokens },
     duration_ms: Date.now() - started,
     ...(error ? { error: truncate(error, 2000) } : {}),
   };

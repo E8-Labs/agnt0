@@ -13,6 +13,8 @@ export interface RunnerInput {
    * with `--plugin-dir`; Codex reads its own from the worktree, so it ignores this.
    */
   pluginDirs?: string[];
+  /** Settings file for this run only, carrying the compression hook. */
+  settingsPath?: string | null;
 }
 
 export interface RunnerResult {

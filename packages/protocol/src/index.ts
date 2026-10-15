@@ -722,6 +722,11 @@ export const AgentStats = z.object({
   model_mix: z.array(z.object({ model: z.string(), steps: z.number().int() })),
   /** Skills its steps have loaded, most-loaded first. Empty until one has run with a skill. */
   skills: z.array(z.object({ slug: z.string(), loads: z.number().int() })).default([]),
+  /**
+   * Tool-output tokens this agent's steps never had to read, because compression shortened them.
+   * Absent when no step of this agent ran with compression on, which is not the same as zero saved.
+   */
+  tokens_saved: z.number().int().optional(),
   last_active_at: z.string().nullable(),
 });
 export type AgentStats = z.infer<typeof AgentStats>;
