@@ -1171,6 +1171,42 @@ export const AgentSkillOverrideRequest = z.object({
 });
 export type AgentSkillOverrideRequest = z.infer<typeof AgentSkillOverrideRequest>;
 
+/* -------------------------------------------------- token savings (M2/M3) */
+
+/** One row of the savings breakdown: a day, an agent or a ticket. */
+export const SavingsBucket = z.object({
+  key: z.string(),
+  label: z.string(),
+  /** Tool-output tokens before compression, and after. */
+  raw: z.number().int(),
+  sent: z.number().int(),
+});
+export type SavingsBucket = z.infer<typeof SavingsBucket>;
+
+export const SavingsResponse = z.object({
+  totals: z.object({
+    raw: z.number().int(),
+    sent: z.number().int(),
+    saved: z.number().int(),
+    steps: z.number().int(),
+    /** Steps that actually passed tool output through the compressor. */
+    steps_compressed: z.number().int(),
+  }),
+  by_day: z.array(SavingsBucket),
+  by_agent: z.array(SavingsBucket),
+  by_ticket: z.array(SavingsBucket),
+  /** Estimate, at list API prices: what reading the raw output would have cost. Absent when nothing was measured. */
+  usd_saved: z.number().optional(),
+  /**
+   * Estimate: credits those tokens would have been charged, and that as a share of the weekly
+   * allowance. Approximate because a step's charge is capped per role, so some of these tokens would
+   * not have been billed anyway.
+   */
+  credits_saved: z.number().int().optional(),
+  plan_share: z.number().optional(),
+});
+export type SavingsResponse = z.infer<typeof SavingsResponse>;
+
 export const m2routes = {
   checkpoints: (projectId: string) => `/v1/projects/${projectId}/checkpoints`,
   checkpointRestore: (checkpointId: string) => `/v1/checkpoints/${checkpointId}/restore`,
@@ -1196,6 +1232,7 @@ export const m2routes = {
   canvasComment: (commentId: string) => `/v1/canvas/comments/${commentId}`,
   inspo: (projectId: string) => `/v1/projects/${projectId}/inspo`,
   inspoItem: (id: string) => `/v1/inspo/${id}`,
+  savings: (projectId: string) => `/v1/projects/${projectId}/savings`,
   skills: "/v1/skills",
   projectSkills: (projectId: string) => `/v1/projects/${projectId}/skills`,
   projectSkill: (projectId: string, skillId: string) => `/v1/projects/${projectId}/skills/${skillId}`,
